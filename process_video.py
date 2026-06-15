@@ -76,7 +76,7 @@ async def main():
     cap.release()
 
     # Prepare Caption
-    caption = f"🎬 **{title}**\n\n📌 Video Source: {VIDEO_URL}\n\n#Video #Manager"
+    caption = f"🎬 **{title}**\n\n#Video #Manager"
 
     # Upload to Telegram
     print("Uploading to Telegram...")
