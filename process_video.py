@@ -7,11 +7,10 @@ import yt_dlp
 from telethon import TelegramClient, events
 from telethon.tl.types import InputMediaPhoto
 
-# Config from environment (GitHub Actions Secrets or Payload)
+# Config from environment
 API_ID = os.environ.get('TG_API_ID')
 API_HASH = os.environ.get('TG_API_HASH')
 BOT_TOKEN = os.environ.get('TG_BOT_TOKEN')
-CHANNEL_ID = int(os.environ.get('TG_CHANNEL_ID', 0))
 
 # Get inputs from the repository dispatch payload
 event_payload = os.environ.get('GITHUB_EVENT_PAYLOAD')
@@ -22,13 +21,19 @@ VIDEO_URL = client_payload.get('video_url')
 PHOTO_CAPTION_TEMPLATE = client_payload.get('photo_caption', "#Video #PremiumV2")
 VIDEO_CAPTION_TEMPLATE = client_payload.get('video_caption', "# Full Video Outta")
 NUM_PHOTOS = int(client_payload.get('num_photos', 4))
+# Use dynamic channel ID from payload, fallback to secret if not provided
+TARGET_CHANNEL_ID = client_payload.get('target_channel_id')
+if TARGET_CHANNEL_ID:
+    TARGET_CHANNEL_ID = int(TARGET_CHANNEL_ID)
+else:
+    TARGET_CHANNEL_ID = int(os.environ.get('TG_CHANNEL_ID', 0))
 
 async def main():
-    if not VIDEO_URL:
-        print("No video URL provided.")
+    if not VIDEO_URL or not TARGET_CHANNEL_ID:
+        print("Missing required parameters.")
         return
 
-    print(f"Processing video: {VIDEO_URL}")
+    print(f"Processing video for Channel {TARGET_CHANNEL_ID}: {VIDEO_URL}")
     
     # 1. Download Video
     ydl_opts = {
@@ -47,11 +52,9 @@ async def main():
     cap = cv2.VideoCapture('video.mp4')
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
-    duration = total_frames / fps
     
     screenshots = []
     for i in range(1, NUM_PHOTOS + 1):
-        # Pick frames at regular intervals
         frame_pos = int((total_frames / (NUM_PHOTOS + 1)) * i)
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
         ret, frame = cap.read()
@@ -66,12 +69,11 @@ async def main():
         # Upload Photos as Album
         photo_caption = f"🎬 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
         media = [InputMediaPhoto(open(s, 'rb')) for s in screenshots]
-        # Only add caption to the first photo
         if media:
             media[0] = InputMediaPhoto(open(screenshots[0], 'rb'), caption=photo_caption, parse_mode='markdown')
         
-        await client.send_file(CHANNEL_ID, media)
-        print("Photos uploaded.")
+        await client.send_file(TARGET_CHANNEL_ID, media)
+        print(f"Photos uploaded to {TARGET_CHANNEL_ID}.")
 
         # Upload Video
         video_caption = f"🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}"
@@ -80,14 +82,14 @@ async def main():
             print(f'Uploading video: {current * 100 / total:.1f}%')
 
         await client.send_file(
-            CHANNEL_ID, 
+            TARGET_CHANNEL_ID, 
             'video.mp4', 
             caption=video_caption, 
             parse_mode='markdown',
             supports_streaming=True,
             progress_callback=progress_callback
         )
-        print("Video uploaded.")
+        print(f"Video uploaded to {TARGET_CHANNEL_ID}.")
 
 if __name__ == '__main__':
     asyncio.run(main())
