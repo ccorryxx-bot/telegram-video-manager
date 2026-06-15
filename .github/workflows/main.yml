@@ -5,7 +5,7 @@ on:
     types: [process_video]
 
 jobs:
-  build:
+  process:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -14,20 +14,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libsm6 libxext6
-          pip install opencv-python telethon yt-dlp
+          pip install yt-dlp opencv-python telethon
 
-      - name: Run Video Processor
+      - name: Run processor
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TARGET_CHANNEL_ID: ${{ secrets.TARGET_CHANNEL_ID }}
-          TG_SESSION: ${{ secrets.TG_SESSION }}
-          VIDEO_URL: ${{ github.event.client_payload.video_url }}
+          TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
+          GITHUB_EVENT_PAYLOAD: ${{ toJson(github.event) }}
         run: python process_video.py
