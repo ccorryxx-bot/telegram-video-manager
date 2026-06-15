@@ -33,7 +33,6 @@ async def main():
         message_id = int(tg_match.group(2))
         
         try:
-            # Download directly from Telegram
             msg = await client.get_messages(channel_username, ids=message_id)
             if msg and msg.media:
                 await client.download_media(msg, video_file)
@@ -47,7 +46,6 @@ async def main():
             await client.disconnect()
             return
     else:
-        # 1. Download Video using yt-dlp for non-telegram links
         print("Non-Telegram Link. Downloading via yt-dlp...")
         subprocess.run(["yt-dlp", "-o", video_file, VIDEO_URL])
         try:
@@ -60,7 +58,7 @@ async def main():
         await client.disconnect()
         return
 
-    # 2. Take 4 Screenshots using OpenCV
+    # Take 4 Screenshots using OpenCV
     cap = cv2.VideoCapture(video_file)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -77,20 +75,45 @@ async def main():
             screenshots.append(name)
     cap.release()
 
-    # 3. Prepare Caption
+    # Prepare Caption
     caption = f"🎬 **{title}**\n\n📌 Video Source: {VIDEO_URL}\n\n#Video #Manager"
 
-    # 4. Upload to Telegram
+    # Upload to Telegram
     print("Uploading to Telegram...")
-    # Upload screenshots as a group
-    if screenshots:
-        await client.send_file(CHANNEL_ID, screenshots, caption=caption)
     
-    # Upload Video file
-    await client.send_file(CHANNEL_ID, video_file, caption="Full Video File", supports_streaming=True)
+    # 1. Upload screenshots as a group
+    if screenshots:
+        try:
+            await client.send_file(CHANNEL_ID, screenshots, caption=caption)
+            print("Screenshots uploaded successfully.")
+        except Exception as e:
+            print(f"Error uploading screenshots: {e}")
+    
+    # 2. Upload Video file with progress and error handling
+    if os.path.exists(video_file):
+        print(f"Uploading Video: {video_file} ({os.path.getsize(video_file)} bytes)")
+        try:
+            # For large files, Telethon sometimes needs explicit handling or simply better connection
+            await client.send_file(
+                CHANNEL_ID, 
+                video_file, 
+                caption="Full Video File", 
+                supports_streaming=True,
+                progress_callback=lambda current, total: print(f'Uploaded {current}/{total} ({(current/total)*100:.2f}%)')
+            )
+            print("Video uploaded successfully.")
+        except Exception as e:
+            print(f"Error uploading video: {e}")
+            # Try uploading as a document if video upload fails
+            try:
+                print("Retrying as a document...")
+                await client.send_file(CHANNEL_ID, video_file, force_document=True)
+                print("Uploaded as document.")
+            except Exception as e2:
+                print(f"Final upload failed: {e2}")
     
     await client.disconnect()
-    print("Upload Complete")
+    print("Process Complete")
 
 if __name__ == "__main__":
     asyncio.run(main())
