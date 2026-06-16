@@ -51,6 +51,21 @@ def get_video_info(file_path):
         print(f"Metadata Error: {e}")
         return 0, 0, 0
 
+def generate_thumbnail(video_path, thumb_path):
+    """Generate a thumbnail at 10% of the video duration."""
+    try:
+        duration, _, _ = get_video_info(video_path)
+        seek_time = duration * 0.1
+        cmd = [
+            'ffmpeg', '-y', '-ss', str(seek_time), '-i', video_path,
+            '-vframes', '1', '-q:v', '2', thumb_path
+        ]
+        subprocess.run(cmd, check=True)
+        return True if os.path.exists(thumb_path) else False
+    except Exception as e:
+        print(f"Thumbnail Generation Error: {e}")
+        return False
+
 async def main():
     if not VIDEO_URL:
         print("No VIDEO_URL provided.")
@@ -59,12 +74,12 @@ async def main():
     print(f"Processing: {VIDEO_URL} (Mode: {POST_MODE})")
     raw_video = 'raw_video.mp4'
     final_video = 'final_video.mp4'
+    thumbnail = 'thumb.jpg'
     video_title = "Premium Video"
 
-    # 1. Download using yt-dlp (Universal Downloader)
+    # 1. Download using yt-dlp
     try:
         print("Downloading using yt-dlp...")
-        # yt-dlp handles Telegram, YouTube, and many other sites
         cmd = [
             'yt-dlp', 
             '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4', 
@@ -74,7 +89,6 @@ async def main():
         ]
         subprocess.run(cmd, check=True)
         
-        # Get title
         title_cmd = ['yt-dlp', '--get-title', VIDEO_URL]
         title_res = subprocess.run(title_cmd, capture_output=True, text=True)
         if title_res.returncode == 0:
@@ -84,25 +98,28 @@ async def main():
         return
 
     if not os.path.exists(raw_video):
-        print("Download failed: File not found.")
+        print("Download failed.")
         return
 
-    # 2. Convert to Telegram-compatible format (H.264/AAC)
+    # 2. Convert to Telegram-compatible format
     try:
         print("Converting to Telegram-compatible format...")
         convert_cmd = [
             'ffmpeg', '-y', '-i', raw_video,
             '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
             '-c:a', 'aac', '-b:a', '128k',
-            '-pix_fmt', 'yuv420p', # Critical for compatibility
+            '-pix_fmt', 'yuv420p',
             final_video
         ]
         subprocess.run(convert_cmd, check=True)
     except Exception as e:
-        print(f"Conversion Error: {e}. Using raw video as fallback.")
+        print(f"Conversion Error: {e}")
         final_video = raw_video
 
-    # 3. Extract Screenshots
+    # 3. Generate Thumbnail
+    has_thumb = generate_thumbnail(final_video, thumbnail)
+
+    # 4. Extract Screenshots for Album
     screenshots = []
     if os.path.exists(final_video) and POST_MODE in ['album', 'both']:
         try:
@@ -122,13 +139,14 @@ async def main():
         except Exception as e:
             print(f"Screenshot Error: {e}")
 
-    # 4. Upload to Telegram with Metadata
+    # 5. Upload to Telegram
     try:
         print("Uploading to Telegram...")
         uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
         await uploader.start(bot_token=BOT_TOKEN)
         async with uploader:
             duration, width, height = get_video_info(final_video)
+            thumb_file = thumbnail if has_thumb else None
             
             if POST_MODE == 'album' and screenshots:
                 photo_caption = f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
@@ -140,6 +158,7 @@ async def main():
                     TARGET_CHANNEL_ID, 
                     final_video, 
                     caption=video_caption, 
+                    thumb=thumb_file,
                     parse_mode='markdown', 
                     supports_streaming=True,
                     attributes=[types.DocumentAttributeVideo(
@@ -160,6 +179,7 @@ async def main():
                         TARGET_CHANNEL_ID, 
                         final_video, 
                         caption=video_caption, 
+                        thumb=thumb_file,
                         parse_mode='markdown', 
                         supports_streaming=True,
                         attributes=[types.DocumentAttributeVideo(
@@ -169,12 +189,12 @@ async def main():
                             supports_streaming=True
                         )]
                     )
-        print("Upload completed successfully.")
+        print("Upload completed.")
     except Exception as e:
         print(f"Upload Error: {e}")
 
     # Cleanup
-    for f in [raw_video, final_video] + screenshots:
+    for f in [raw_video, final_video, thumbnail] + screenshots:
         if os.path.exists(f):
             os.remove(f)
 
