@@ -1,112 +1,64 @@
 import os
 import sys
-import json
 import asyncio
 import cv2
-import yt_dlp
-import re
-from telethon import TelegramClient, events
+import requests
+from telethon import TelegramClient
 from telethon.tl.types import InputMediaPhoto
 
-# Config from environment
-API_ID = int(os.environ.get('TG_API_ID'))
-API_HASH = os.environ.get('TG_API_HASH')
-BOT_TOKEN = os.environ.get('TG_BOT_TOKEN')
-
-# Get inputs from the repository dispatch payload
-event_payload = os.environ.get('GITHUB_EVENT_PAYLOAD')
-payload_data = json.loads(event_payload) if event_payload else {}
-client_payload = payload_data.get('client_payload', {})
-VIDEO_URL = client_payload.get('video_url')
-PHOTO_CAPTION_TEMPLATE = client_payload.get('photo_caption', "#Video #PremiumV2")
-VIDEO_CAPTION_TEMPLATE = client_payload.get('video_caption', "# Full Video Outta")
-NUM_PHOTOS = int(client_payload.get('num_photos', 4))
-
-TARGET_CHANNEL_ID = client_payload.get('target_channel_id')
-if TARGET_CHANNEL_ID:
-    try:
-        TARGET_CHANNEL_ID = int(TARGET_CHANNEL_ID)
-    except ValueError:
-        TARGET_CHANNEL_ID = int(os.environ.get('TG_CHANNEL_ID', 0))
-else:
-    TARGET_CHANNEL_ID = int(os.environ.get('TG_CHANNEL_ID', 0))
+# Environment Variables
+API_ID = int(os.environ.get('API_ID', '0'))
+API_HASH = os.environ.get('API_HASH', '')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
+TARGET_CHANNEL_ID = int(os.environ.get('TARGET_CHANNEL_ID', '0'))
+VIDEO_URL = os.environ.get('VIDEO_URL', '')
+PHOTO_CAPTION_TEMPLATE = os.environ.get('PHOTO_CAPTION', '#Video #PremiumV2')
+VIDEO_CAPTION_TEMPLATE = os.environ.get('VIDEO_CAPTION', '# Full Video Outta')
+NUM_PHOTOS = int(os.environ.get('NUM_PHOTOS', '4'))
 
 async def main():
-    if not VIDEO_URL or not TARGET_CHANNEL_ID:
-        print("Missing required parameters.")
+    if not VIDEO_URL:
+        print("No VIDEO_URL provided.")
         return
 
     print(f"Processing video for Channel {TARGET_CHANNEL_ID}: {VIDEO_URL}")
     video_path = 'video.mp4'
-    video_title = "Video"
+    video_title = "Premium Video"
 
     # 1. Download Video
-    # Check if it's a Telegram link
-    is_telegram = "t.me/" in VIDEO_URL
-    
-    if is_telegram:
+    if 't.me/' in VIDEO_URL:
         print("Telegram link detected. Using Telethon for download...")
-        client = TelegramClient('bot_downloader', API_ID, API_HASH)
-        await client.start(bot_token=BOT_TOKEN)
-        async with client:
-            # Parse channel and message ID from URL
-            # Example: https://t.me/channel_name/123 or https://t.me/c/123456/789
+        downloader = TelegramClient('bot_downloader', API_ID, API_HASH)
+        await downloader.start(bot_token=BOT_TOKEN)
+        async with downloader:
+            # Extract channel and message ID from t.me link
             parts = VIDEO_URL.split('/')
-            msg_id = int(parts[-1])
-            peer = parts[-2]
+            channel_username = parts[-2]
+            message_id = int(parts[-1])
             
-            if peer == 'c': # Private channel
-                peer = int("-100" + parts[-3])
+            entity = await downloader.get_entity(channel_username)
+            message = await downloader.get_messages(entity, ids=message_id)
             
-            try:
-                message = await client.get_messages(peer, ids=msg_id)
-                if message and message.video:
-                    print("Downloading video from Telegram...")
-                    await client.download_media(message.video, file=video_path)
-                    video_title = message.text[:50] if message.text else "Telegram Video"
-                else:
-                    print("No video found in the Telegram message.")
-                    return
-            except Exception as e:
-                print(f"Error downloading from Telegram: {e}")
+            if message and message.video:
+                print("Downloading video from Telegram...")
+                await downloader.download_media(message.video, file=video_path)
+                if message.text:
+                    video_title = message.text[:50]
+            else:
+                print("No video found in Telegram message.")
                 return
     else:
-        print("General link detected. Using yt-dlp...")
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': video_path,
-            'quiet': False,
-            'no_warnings': False,
-            'ignoreerrors': True,
-        }
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(VIDEO_URL, download=True)
-                if info:
-                    video_title = info.get('title', 'Video')
-                else:
-                    print("yt-dlp could not extract info.")
-                    # Check if file was still downloaded (sometimes it happens even if extract_info returns None)
-                    if not os.path.exists(video_path):
-                        return
-        except Exception as e:
-            print(f"yt-dlp Error: {e}")
-            if not os.path.exists(video_path):
-                return
-
-    if not os.path.exists(video_path):
-        print("Video file not found after download attempt.")
-        return
+        print(f"Downloading video from URL: {VIDEO_URL}")
+        r = requests.get(VIDEO_URL, stream=True)
+        with open(video_path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
 
     # 2. Extract Screenshots
-    print("Extracting screenshots...")
-    cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
-    if total_frames <= 0:
-        print("Error: Could not read video frames.")
-        cap.release()
-    else:
+    if os.path.exists(video_path):
+        print("Extracting screenshots...")
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         screenshots = []
         for i in range(1, NUM_PHOTOS + 1):
             frame_pos = int((total_frames / (NUM_PHOTOS + 1)) * i)
@@ -127,13 +79,15 @@ async def main():
             photo_caption = f"🎬 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
             media = []
             for i, s in enumerate(screenshots):
-                if i == 0:
-                    media.append(InputMediaPhoto(open(s, 'rb'), caption=photo_caption, parse_mode='markdown'))
-                else:
-                    media.append(InputMediaPhoto(open(s, 'rb')))
+                # Telethon's InputMediaPhoto uses 'file' instead of positional argument in some versions, 
+                # but the standard way to send album with captions is using upload_file first or send_file with a list.
+                # Actually, in Telethon, send_file with a list of files works as an album.
+                media.append(s)
             
             if media:
-                await uploader.send_file(TARGET_CHANNEL_ID, media)
+                # To add caption to the first photo of the album in Telethon:
+                # We can use the 'caption' parameter in send_file, it will apply to the whole album or the first photo.
+                await uploader.send_file(TARGET_CHANNEL_ID, media, caption=photo_caption, parse_mode='markdown')
                 print(f"Photos uploaded.")
 
             # Upload Video
@@ -150,7 +104,14 @@ async def main():
                 supports_streaming=True,
                 progress_callback=progress_callback
             )
-            print(f"Video uploaded to {TARGET_CHANNEL_ID}.")
+            print("Video uploaded successfully.")
+
+    # Cleanup
+    if os.path.exists(video_path):
+        os.remove(video_path)
+    for s in screenshots:
+        if os.path.exists(s):
+            os.remove(s)
 
 if __name__ == '__main__':
     asyncio.run(main())
