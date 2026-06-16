@@ -204,7 +204,7 @@ async def main():
         async with uploader:
             thumb_file = thumbnail if has_thumb else None
             
-            if POST_MODE == 'album' and screenshots:
+            if POST_MODE in ['album', 'both'] and screenshots:
                 photo_caption = f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
                 await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
             
