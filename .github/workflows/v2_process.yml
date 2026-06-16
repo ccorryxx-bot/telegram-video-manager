@@ -1,0 +1,30 @@
+name: Process Video V2
+on:
+  repository_dispatch:
+    types: [process_video_v2]
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsm6 libxext6
+          pip install yt-dlp opencv-python telethon requests
+      - name: Run processor
+        env:
+          API_ID: ${{ github.event.client_payload.api_id || secrets.TG_API_ID }}
+          API_HASH: ${{ github.event.client_payload.api_hash || secrets.TG_API_HASH }}
+          BOT_TOKEN: ${{ github.event.client_payload.bot_token || secrets.TG_BOT_TOKEN }}
+          TARGET_CHANNEL_ID: ${{ github.event.client_payload.target_channel_id || secrets.TG_CHANNEL_ID }}
+          VIDEO_URL: ${{ github.event.client_payload.video_url }}
+          PHOTO_CAPTION: ${{ github.event.client_payload.photo_caption }}
+          VIDEO_CAPTION: ${{ github.event.client_payload.video_caption }}
+          NUM_PHOTOS: ${{ github.event.client_payload.num_photos }}
+        run: python process_video.py
