@@ -4,6 +4,7 @@ import asyncio
 import cv2
 import subprocess
 import json
+import requests
 from telethon import TelegramClient, types
 
 # Environment Variables
@@ -15,6 +16,8 @@ PHOTO_CAPTION_TEMPLATE = os.environ.get('PHOTO_CAPTION', '#Video #PremiumV2')
 VIDEO_CAPTION_TEMPLATE = os.environ.get('VIDEO_CAPTION', '# Full Video Outta')
 NUM_PHOTOS = int(os.environ.get('NUM_PHOTOS', '4'))
 POST_MODE = os.environ.get('POST_MODE', 'both')
+CHAT_ID = os.environ.get('CHAT_ID', '')
+WORKER_URL = os.environ.get('WORKER_URL', '')
 
 # Target Channel ID
 raw_channel_id = os.environ.get('TARGET_CHANNEL_ID', '0').strip()
@@ -28,6 +31,15 @@ try:
 except ValueError:
     print(f"Error: Invalid TARGET_CHANNEL_ID format: '{raw_channel_id}'")
     sys.exit(1)
+
+def send_progress(text):
+    if CHAT_ID and WORKER_URL:
+        try:
+            requests.post(WORKER_URL, json={
+                "chat_id": CHAT_ID,
+                "progress_text": text
+            })
+        except: pass
 
 def get_video_info(file_path):
     """Extract metadata using ffprobe for Telegram upload."""
@@ -71,7 +83,7 @@ async def main():
         print("No VIDEO_URL provided.")
         return
 
-    print(f"Processing: {VIDEO_URL} (Mode: {POST_MODE})")
+    send_progress(f"📥 Downloading: {VIDEO_URL}")
     raw_video = 'raw_video.mp4'
     final_video = 'final_video.mp4'
     thumbnail = 'thumb.jpg'
@@ -79,7 +91,6 @@ async def main():
 
     # 1. Download using yt-dlp
     try:
-        print("Downloading using yt-dlp...")
         cmd = [
             'yt-dlp', 
             '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4', 
@@ -94,18 +105,21 @@ async def main():
         if title_res.returncode == 0:
             video_title = title_res.stdout.strip()
     except Exception as e:
-        print(f"Download Error: {e}")
+        send_progress(f"❌ Download Error: {str(e)}")
         return
 
     if not os.path.exists(raw_video):
-        print("Download failed.")
+        send_progress("❌ Download failed.")
         return
 
-    # 2. Convert to Telegram-compatible format
+    # 2. Convert, Watermark & Compress
+    send_progress("⚙️ Applying Watermark and Smart Compression...")
     try:
-        print("Converting to Telegram-compatible format...")
+        # Watermark text: V3 PREMIUM (can be customized)
+        watermark_text = "V3 PREMIUM"
         convert_cmd = [
             'ffmpeg', '-y', '-i', raw_video,
+            '-vf', f"drawtext=text='{watermark_text}':x=10:y=10:fontsize=24:fontcolor=white@0.5:box=1:boxcolor=black@0.2",
             '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
             '-c:a', 'aac', '-b:a', '128k',
             '-pix_fmt', 'yuv420p',
@@ -113,17 +127,17 @@ async def main():
         ]
         subprocess.run(convert_cmd, check=True)
     except Exception as e:
-        print(f"Conversion Error: {e}")
+        send_progress(f"⚠️ Conversion Error: {str(e)}")
         final_video = raw_video
 
     # 3. Generate Thumbnail
+    send_progress("📸 Generating screenshots and thumbnail...")
     has_thumb = generate_thumbnail(final_video, thumbnail)
 
     # 4. Extract Screenshots for Album
     screenshots = []
     if os.path.exists(final_video) and POST_MODE in ['album', 'both']:
         try:
-            print("Extracting screenshots...")
             cap = cv2.VideoCapture(final_video)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             if total_frames > 0:
@@ -140,8 +154,8 @@ async def main():
             print(f"Screenshot Error: {e}")
 
     # 5. Upload to Telegram
+    send_progress("📤 Uploading to Telegram...")
     try:
-        print("Uploading to Telegram...")
         uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
         await uploader.start(bot_token=BOT_TOKEN)
         async with uploader:
@@ -189,9 +203,9 @@ async def main():
                             supports_streaming=True
                         )]
                     )
-        print("Upload completed.")
+        send_progress("✅ Task Completed Successfully!")
     except Exception as e:
-        print(f"Upload Error: {e}")
+        send_progress(f"❌ Upload Error: {str(e)}")
 
     # Cleanup
     for f in [raw_video, final_video, thumbnail] + screenshots:
