@@ -2,8 +2,9 @@ import os
 import sys
 import asyncio
 import cv2
-import requests
-from telethon import TelegramClient
+import subprocess
+import json
+from telethon import TelegramClient, types
 
 # Environment Variables
 API_ID = int(os.environ.get('API_ID', '0'))
@@ -13,9 +14,9 @@ VIDEO_URL = os.environ.get('VIDEO_URL', '')
 PHOTO_CAPTION_TEMPLATE = os.environ.get('PHOTO_CAPTION', '#Video #PremiumV2')
 VIDEO_CAPTION_TEMPLATE = os.environ.get('VIDEO_CAPTION', '# Full Video Outta')
 NUM_PHOTOS = int(os.environ.get('NUM_PHOTOS', '4'))
-POST_MODE = os.environ.get('POST_MODE', 'both') # Options: 'album', 'video', 'both'
+POST_MODE = os.environ.get('POST_MODE', 'both')
 
-# Robust Channel ID parsing
+# Target Channel ID
 raw_channel_id = os.environ.get('TARGET_CHANNEL_ID', '0').strip()
 try:
     if raw_channel_id.startswith('-100'):
@@ -28,53 +29,85 @@ except ValueError:
     print(f"Error: Invalid TARGET_CHANNEL_ID format: '{raw_channel_id}'")
     sys.exit(1)
 
+def get_video_info(file_path):
+    """Extract metadata using ffprobe for Telegram upload."""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json', 
+            '-show_format', '-show_streams', file_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        data = json.loads(result.stdout)
+        
+        duration = int(float(data['format']['duration']))
+        width, height = 0, 0
+        for stream in data['streams']:
+            if stream['codec_type'] == 'video':
+                width = int(stream['width'])
+                height = int(stream['height'])
+                break
+        return duration, width, height
+    except Exception as e:
+        print(f"Metadata Error: {e}")
+        return 0, 0, 0
+
 async def main():
     if not VIDEO_URL:
         print("No VIDEO_URL provided.")
         return
 
-    print(f"Processing video for Channel {TARGET_CHANNEL_ID}: {VIDEO_URL} (Mode: {POST_MODE})")
-    video_path = 'video.mp4'
+    print(f"Processing: {VIDEO_URL} (Mode: {POST_MODE})")
+    raw_video = 'raw_video.mp4'
+    final_video = 'final_video.mp4'
     video_title = "Premium Video"
 
-    # 1. Download Video
+    # 1. Download using yt-dlp (Universal Downloader)
     try:
-        if 't.me/' in VIDEO_URL:
-            print("Telegram link detected. Using Telethon for download...")
-            downloader = TelegramClient('bot_downloader', API_ID, API_HASH)
-            await downloader.start(bot_token=BOT_TOKEN)
-            async with downloader:
-                parts = VIDEO_URL.split('/')
-                channel_username = parts[-2]
-                message_id = int(parts[-1])
-                
-                entity = await downloader.get_entity(channel_username)
-                message = await downloader.get_messages(entity, ids=message_id)
-                
-                if message and message.video:
-                    print("Downloading video from Telegram...")
-                    await downloader.download_media(message.video, file=video_path)
-                    if message.text:
-                        video_title = message.text[:50]
-                else:
-                    print("No video found in Telegram message.")
-                    return
-        else:
-            print(f"Downloading video from URL: {VIDEO_URL}")
-            r = requests.get(VIDEO_URL, stream=True, timeout=60)
-            with open(video_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
+        print("Downloading using yt-dlp...")
+        # yt-dlp handles Telegram, YouTube, and many other sites
+        cmd = [
+            'yt-dlp', 
+            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4', 
+            '--merge-output-format', 'mp4',
+            '-o', raw_video,
+            VIDEO_URL
+        ]
+        subprocess.run(cmd, check=True)
+        
+        # Get title
+        title_cmd = ['yt-dlp', '--get-title', VIDEO_URL]
+        title_res = subprocess.run(title_cmd, capture_output=True, text=True)
+        if title_res.returncode == 0:
+            video_title = title_res.stdout.strip()
     except Exception as e:
         print(f"Download Error: {e}")
         return
 
-    # 2. Extract Screenshots (if needed)
+    if not os.path.exists(raw_video):
+        print("Download failed: File not found.")
+        return
+
+    # 2. Convert to Telegram-compatible format (H.264/AAC)
+    try:
+        print("Converting to Telegram-compatible format...")
+        convert_cmd = [
+            'ffmpeg', '-y', '-i', raw_video,
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+            '-c:a', 'aac', '-b:a', '128k',
+            '-pix_fmt', 'yuv420p', # Critical for compatibility
+            final_video
+        ]
+        subprocess.run(convert_cmd, check=True)
+    except Exception as e:
+        print(f"Conversion Error: {e}. Using raw video as fallback.")
+        final_video = raw_video
+
+    # 3. Extract Screenshots
     screenshots = []
-    if os.path.exists(video_path) and POST_MODE in ['album', 'both']:
+    if os.path.exists(final_video) and POST_MODE in ['album', 'both']:
         try:
             print("Extracting screenshots...")
-            cap = cv2.VideoCapture(video_path)
+            cap = cv2.VideoCapture(final_video)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             if total_frames > 0:
                 for i in range(1, NUM_PHOTOS + 1):
@@ -89,41 +122,61 @@ async def main():
         except Exception as e:
             print(f"Screenshot Error: {e}")
 
-    # 3. Upload to Telegram
+    # 4. Upload to Telegram with Metadata
     try:
         print("Uploading to Telegram...")
         uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
         await uploader.start(bot_token=BOT_TOKEN)
         async with uploader:
-            if POST_MODE == 'album' and screenshots:
-                photo_caption = f"🎬 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
-                await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
-                print("Album uploaded.")
+            duration, width, height = get_video_info(final_video)
             
-            elif POST_MODE == 'video' and os.path.exists(video_path):
+            if POST_MODE == 'album' and screenshots:
+                photo_caption = f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
+                await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
+            
+            elif POST_MODE == 'video' and os.path.exists(final_video):
                 video_caption = f"🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}"
-                await uploader.send_file(TARGET_CHANNEL_ID, video_path, caption=video_caption, parse_mode='markdown', supports_streaming=True)
-                print("Video uploaded.")
+                await uploader.send_file(
+                    TARGET_CHANNEL_ID, 
+                    final_video, 
+                    caption=video_caption, 
+                    parse_mode='markdown', 
+                    supports_streaming=True,
+                    attributes=[types.DocumentAttributeVideo(
+                        duration=duration,
+                        w=width,
+                        h=height,
+                        supports_streaming=True
+                    )]
+                )
             
             elif POST_MODE == 'both':
-                # Combined mode: Upload album first, then video
                 if screenshots:
                     photo_caption = f"📸 **{video_title} (Preview)**\n\n{PHOTO_CAPTION_TEMPLATE}"
                     await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
-                if os.path.exists(video_path):
+                if os.path.exists(final_video):
                     video_caption = f"🎬 **{video_title} (Full Video)**\n\n{VIDEO_CAPTION_TEMPLATE}"
-                    await uploader.send_file(TARGET_CHANNEL_ID, video_path, caption=video_caption, parse_mode='markdown', supports_streaming=True)
-                print("Album and Video uploaded.")
-
+                    await uploader.send_file(
+                        TARGET_CHANNEL_ID, 
+                        final_video, 
+                        caption=video_caption, 
+                        parse_mode='markdown', 
+                        supports_streaming=True,
+                        attributes=[types.DocumentAttributeVideo(
+                            duration=duration,
+                            w=width,
+                            h=height,
+                            supports_streaming=True
+                        )]
+                    )
+        print("Upload completed successfully.")
     except Exception as e:
         print(f"Upload Error: {e}")
 
     # Cleanup
-    if os.path.exists(video_path):
-        os.remove(video_path)
-    for s in screenshots:
-        if os.path.exists(s):
-            os.remove(s)
+    for f in [raw_video, final_video] + screenshots:
+        if os.path.exists(f):
+            os.remove(f)
 
 if __name__ == '__main__':
     asyncio.run(main())
