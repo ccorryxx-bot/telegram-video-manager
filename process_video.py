@@ -46,7 +46,9 @@ async def main():
     
     if is_telegram:
         print("Telegram link detected. Using Telethon for download...")
-        async with TelegramClient('bot_downloader', API_ID, API_HASH).start(bot_token=BOT_TOKEN) as client:
+        client = TelegramClient('bot_downloader', API_ID, API_HASH)
+        await client.start(bot_token=BOT_TOKEN)
+        async with client:
             # Parse channel and message ID from URL
             # Example: https://t.me/channel_name/123 or https://t.me/c/123456/789
             parts = VIDEO_URL.split('/')
@@ -118,7 +120,9 @@ async def main():
 
         # 3. Upload to Telegram
         print("Uploading to Telegram...")
-        async with TelegramClient('bot_uploader', API_ID, API_HASH).start(bot_token=BOT_TOKEN) as client:
+        uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
+        await uploader.start(bot_token=BOT_TOKEN)
+        async with uploader:
             # Upload Photos as Album
             photo_caption = f"🎬 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
             media = []
@@ -129,7 +133,7 @@ async def main():
                     media.append(InputMediaPhoto(open(s, 'rb')))
             
             if media:
-                await client.send_file(TARGET_CHANNEL_ID, media)
+                await uploader.send_file(TARGET_CHANNEL_ID, media)
                 print(f"Photos uploaded.")
 
             # Upload Video
@@ -138,7 +142,7 @@ async def main():
                 if total > 0:
                     print(f'Uploading video: {current * 100 / total:.1f}%')
             
-            await client.send_file(
+            await uploader.send_file(
                 TARGET_CHANNEL_ID, 
                 video_path, 
                 caption=video_caption, 
