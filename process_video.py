@@ -18,6 +18,8 @@ NUM_PHOTOS = int(os.environ.get('NUM_PHOTOS', '4'))
 POST_MODE = os.environ.get('POST_MODE', 'both')
 CHAT_ID = os.environ.get('CHAT_ID', '')
 WORKER_URL = os.environ.get('WORKER_URL', '')
+MAX_FILE_SIZE_MB = 2000 # 2GB in MB
+TARGET_RESOLUTION = os.environ.get('TARGET_RESOLUTION', '720p') # Default to 720p
 
 # Target Channel ID
 raw_channel_id = os.environ.get('TARGET_CHANNEL_ID', '0').strip()
@@ -112,14 +114,25 @@ async def main():
         send_progress("❌ Download failed.")
         return
 
-    # 2. Convert, Watermark & Compress
-    send_progress("⚙️ Applying Watermark and Smart Compression...")
+    # Determine target resolution for FFmpeg
+    scale_filter = ''
+    if TARGET_RESOLUTION == '720p':
+        scale_filter = 'scale=-2:720'
+    elif TARGET_RESOLUTION == '1080p':
+        scale_filter = 'scale=-2:1080'
+    # Add more resolutions as needed
+
+    # 2. Convert, Watermark, Compress & Apply Quality Selection
+    send_progress("⚙️ Applying Watermark, Smart Compression, and Quality Selection...")
     try:
-        # Watermark text: V3 PREMIUM (can be customized)
         watermark_text = "V3 PREMIUM"
+        vf_filters = [f"drawtext=text='{watermark_text}':x=10:y=10:fontsize=24:fontcolor=white@0.5:box=1:boxcolor=black@0.2"]
+        if scale_filter:
+            vf_filters.append(scale_filter)
+        
         convert_cmd = [
             'ffmpeg', '-y', '-i', raw_video,
-            '-vf', f"drawtext=text='{watermark_text}':x=10:y=10:fontsize=24:fontcolor=white@0.5:box=1:boxcolor=black@0.2",
+            '-vf', ','.join(vf_filters),
             '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
             '-c:a', 'aac', '-b:a', '128k',
             '-pix_fmt', 'yuv420p',
@@ -130,15 +143,45 @@ async def main():
         send_progress(f"⚠️ Conversion Error: {str(e)}")
         final_video = raw_video
 
-    # 3. Generate Thumbnail
-    send_progress("📸 Generating screenshots and thumbnail...")
-    has_thumb = generate_thumbnail(final_video, thumbnail)
+    # 3. Auto-Split if file size > 2GB
+    video_parts = [final_video]
+    if os.path.exists(final_video):
+        file_size_mb = os.path.getsize(final_video) / (1024 * 1024)
+        if file_size_mb > MAX_FILE_SIZE_MB:
+            send_progress(f"✂️ Video size ({file_size_mb:.2f}MB) exceeds {MAX_FILE_SIZE_MB}MB. Splitting video...")
+            video_parts = []
+            duration, _, _ = get_video_info(final_video)
+            part_duration = duration // (int(file_size_mb / MAX_FILE_SIZE_MB) + 1) # Estimate duration per part
+            
+            # Use FFmpeg to split the video
+            i = 0
+            start_time = 0
+            while start_time < duration:
+                part_file = f"part_{i}_{final_video}"
+                split_cmd = [
+                    'ffmpeg', '-y', '-i', final_video,
+                    '-ss', str(start_time), '-t', str(part_duration),
+                    '-c', 'copy', part_file
+                ]
+                try:
+                    subprocess.run(split_cmd, check=True)
+                    video_parts.append(part_file)
+                    start_time += part_duration
+                    i += 1
+                except Exception as e:
+                    send_progress(f"❌ Video split failed for part {i}: {str(e)}")
+                    break
+            send_progress(f"✅ Video split into {len(video_parts)} parts.")
 
-    # 4. Extract Screenshots for Album
+    # 4. Generate Thumbnail (only for the first part if split)
+    send_progress("📸 Generating screenshots and thumbnail...")
+    has_thumb = generate_thumbnail(video_parts[0], thumbnail)
+
+    # 5. Extract Screenshots for Album (only for the first part if split)
     screenshots = []
-    if os.path.exists(final_video) and POST_MODE in ['album', 'both']:
+    if os.path.exists(video_parts[0]) and POST_MODE in ['album', 'both']:
         try:
-            cap = cv2.VideoCapture(final_video)
+            cap = cv2.VideoCapture(video_parts[0])
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             if total_frames > 0:
                 for i in range(1, NUM_PHOTOS + 1):
@@ -153,47 +196,28 @@ async def main():
         except Exception as e:
             print(f"Screenshot Error: {e}")
 
-    # 5. Upload to Telegram
+    # 6. Upload to Telegram
     send_progress("📤 Uploading to Telegram...")
     try:
         uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
         await uploader.start(bot_token=BOT_TOKEN)
         async with uploader:
-            duration, width, height = get_video_info(final_video)
             thumb_file = thumbnail if has_thumb else None
             
             if POST_MODE == 'album' and screenshots:
                 photo_caption = f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
                 await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
             
-            elif POST_MODE == 'video' and os.path.exists(final_video):
-                video_caption = f"🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}"
-                await uploader.send_file(
-                    TARGET_CHANNEL_ID, 
-                    final_video, 
-                    caption=video_caption, 
-                    thumb=thumb_file,
-                    parse_mode='markdown', 
-                    supports_streaming=True,
-                    attributes=[types.DocumentAttributeVideo(
-                        duration=duration,
-                        w=width,
-                        h=height,
-                        supports_streaming=True
-                    )]
-                )
-            
-            elif POST_MODE == 'both':
-                if screenshots:
-                    photo_caption = f"📸 **{video_title} (Preview)**\n\n{PHOTO_CAPTION_TEMPLATE}"
-                    await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
-                if os.path.exists(final_video):
-                    video_caption = f"🎬 **{video_title} (Full Video)**\n\n{VIDEO_CAPTION_TEMPLATE}"
+            if POST_MODE in ['video', 'both']:
+                for i, part in enumerate(video_parts):
+                    duration, width, height = get_video_info(part)
+                    part_caption_suffix = f" (Part {i+1}/{len(video_parts)})" if len(video_parts) > 1 else ""
+                    video_caption = f"🎬 **{video_title}{part_caption_suffix}**\n\n{VIDEO_CAPTION_TEMPLATE}"
                     await uploader.send_file(
                         TARGET_CHANNEL_ID, 
-                        final_video, 
+                        part, 
                         caption=video_caption, 
-                        thumb=thumb_file,
+                        thumb=thumb_file if i == 0 else None, # Only send thumbnail for the first part
                         parse_mode='markdown', 
                         supports_streaming=True,
                         attributes=[types.DocumentAttributeVideo(
@@ -208,7 +232,7 @@ async def main():
         send_progress(f"❌ Upload Error: {str(e)}")
 
     # Cleanup
-    for f in [raw_video, final_video, thumbnail] + screenshots:
+    for f in [raw_video, final_video, thumbnail] + screenshots + video_parts:
         if os.path.exists(f):
             os.remove(f)
 
