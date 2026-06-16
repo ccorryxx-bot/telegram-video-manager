@@ -13,6 +13,7 @@ VIDEO_URL = os.environ.get('VIDEO_URL', '')
 PHOTO_CAPTION_TEMPLATE = os.environ.get('PHOTO_CAPTION', '#Video #PremiumV2')
 VIDEO_CAPTION_TEMPLATE = os.environ.get('VIDEO_CAPTION', '# Full Video Outta')
 NUM_PHOTOS = int(os.environ.get('NUM_PHOTOS', '4'))
+POST_MODE = os.environ.get('POST_MODE', 'both') # Options: 'album', 'video', 'both'
 
 # Robust Channel ID parsing
 raw_channel_id = os.environ.get('TARGET_CHANNEL_ID', '0').strip()
@@ -32,7 +33,7 @@ async def main():
         print("No VIDEO_URL provided.")
         return
 
-    print(f"Processing video for Channel {TARGET_CHANNEL_ID}: {VIDEO_URL}")
+    print(f"Processing video for Channel {TARGET_CHANNEL_ID}: {VIDEO_URL} (Mode: {POST_MODE})")
     video_path = 'video.mp4'
     video_title = "Premium Video"
 
@@ -68,56 +69,54 @@ async def main():
         print(f"Download Error: {e}")
         return
 
-    # 2. Extract Screenshots
+    # 2. Extract Screenshots (if needed)
     screenshots = []
-    if os.path.exists(video_path):
+    if os.path.exists(video_path) and POST_MODE in ['album', 'both']:
         try:
             print("Extracting screenshots...")
             cap = cv2.VideoCapture(video_path)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if total_frames <= 0:
-                print("Error: Could not read video frames.")
-                cap.release()
-                return
-                
-            for i in range(1, NUM_PHOTOS + 1):
-                frame_pos = int((total_frames / (NUM_PHOTOS + 1)) * i)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-                ret, frame = cap.read()
-                if ret:
-                    filename = f'screenshot_{i}.jpg'
-                    cv2.imwrite(filename, frame)
-                    screenshots.append(filename)
+            if total_frames > 0:
+                for i in range(1, NUM_PHOTOS + 1):
+                    frame_pos = int((total_frames / (NUM_PHOTOS + 1)) * i)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
+                    ret, frame = cap.read()
+                    if ret:
+                        filename = f'screenshot_{i}.jpg'
+                        cv2.imwrite(filename, frame)
+                        screenshots.append(filename)
             cap.release()
         except Exception as e:
             print(f"Screenshot Error: {e}")
 
-        # 3. Upload to Telegram
-        if screenshots or os.path.exists(video_path):
-            try:
-                print("Uploading to Telegram...")
-                uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
-                await uploader.start(bot_token=BOT_TOKEN)
-                async with uploader:
-                    # Upload Photos as Album
-                    if screenshots:
-                        photo_caption = f"🎬 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
-                        await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
-                        print(f"Photos uploaded.")
+    # 3. Upload to Telegram
+    try:
+        print("Uploading to Telegram...")
+        uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
+        await uploader.start(bot_token=BOT_TOKEN)
+        async with uploader:
+            if POST_MODE == 'album' and screenshots:
+                photo_caption = f"🎬 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
+                await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
+                print("Album uploaded.")
+            
+            elif POST_MODE == 'video' and os.path.exists(video_path):
+                video_caption = f"🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}"
+                await uploader.send_file(TARGET_CHANNEL_ID, video_path, caption=video_caption, parse_mode='markdown', supports_streaming=True)
+                print("Video uploaded.")
+            
+            elif POST_MODE == 'both':
+                # Combined mode: Upload album first, then video
+                if screenshots:
+                    photo_caption = f"📸 **{video_title} (Preview)**\n\n{PHOTO_CAPTION_TEMPLATE}"
+                    await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
+                if os.path.exists(video_path):
+                    video_caption = f"🎬 **{video_title} (Full Video)**\n\n{VIDEO_CAPTION_TEMPLATE}"
+                    await uploader.send_file(TARGET_CHANNEL_ID, video_path, caption=video_caption, parse_mode='markdown', supports_streaming=True)
+                print("Album and Video uploaded.")
 
-                    # Upload Video
-                    if os.path.exists(video_path):
-                        video_caption = f"🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}"
-                        await uploader.send_file(
-                            TARGET_CHANNEL_ID, 
-                            video_path, 
-                            caption=video_caption, 
-                            parse_mode='markdown',
-                            supports_streaming=True
-                        )
-                        print("Video uploaded successfully.")
-            except Exception as e:
-                print(f"Upload Error: {e}")
+    except Exception as e:
+        print(f"Upload Error: {e}")
 
     # Cleanup
     if os.path.exists(video_path):
