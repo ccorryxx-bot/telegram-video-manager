@@ -120,7 +120,6 @@ async def main():
         scale_filter = 'scale=-2:720'
     elif TARGET_RESOLUTION == '1080p':
         scale_filter = 'scale=-2:1080'
-    # Add more resolutions as needed
 
     # 2. Convert, Watermark, Compress & Apply Quality Selection
     send_progress("⚙️ Applying Watermark, Smart Compression, and Quality Selection...")
@@ -151,9 +150,8 @@ async def main():
             send_progress(f"✂️ Video size ({file_size_mb:.2f}MB) exceeds {MAX_FILE_SIZE_MB}MB. Splitting video...")
             video_parts = []
             duration, _, _ = get_video_info(final_video)
-            part_duration = duration // (int(file_size_mb / MAX_FILE_SIZE_MB) + 1) # Estimate duration per part
+            part_duration = duration // (int(file_size_mb / MAX_FILE_SIZE_MB) + 1)
             
-            # Use FFmpeg to split the video
             i = 0
             start_time = 0
             while start_time < duration:
@@ -173,13 +171,12 @@ async def main():
                     break
             send_progress(f"✅ Video split into {len(video_parts)} parts.")
 
-    # 4. Generate Thumbnail (only for the first part if split)
+    # 4. Generate Thumbnail and Screenshots
     send_progress("📸 Generating screenshots and thumbnail...")
     has_thumb = generate_thumbnail(video_parts[0], thumbnail)
-
-    # 5. Extract Screenshots for Album (only for the first part if split)
+    
     screenshots = []
-    if os.path.exists(video_parts[0]) and POST_MODE in ['album', 'both']:
+    if os.path.exists(video_parts[0]) and POST_MODE in ['album', 'both', 'video']:
         try:
             cap = cv2.VideoCapture(video_parts[0])
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -196,7 +193,7 @@ async def main():
         except Exception as e:
             print(f"Screenshot Error: {e}")
 
-    # 6. Upload to Telegram
+    # 5. Upload to Telegram
     send_progress("📤 Uploading to Telegram...")
     try:
         uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
@@ -204,29 +201,67 @@ async def main():
         async with uploader:
             thumb_file = thumbnail if has_thumb else None
             
-            if POST_MODE in ['album', 'both'] and screenshots:
-                photo_caption = f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
-                await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
-            
-            if POST_MODE in ['video', 'both']:
+            # MODE: Combined Album + Video (Now assigned to 'video' mode)
+            if POST_MODE == 'video' and screenshots:
+                media_group = []
+                # Add screenshots to the media group
+                for i, img in enumerate(screenshots):
+                    # Only the first item in a media group can have a caption that represents the whole group in some clients,
+                    # but usually, we put it on the first one.
+                    caption = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
+                    media_group.append(types.InputMediaPhoto(file=img, caption=caption, parse_mode='markdown'))
+                
+                # Add the first part of the video to the media group
+                duration, width, height = get_video_info(video_parts[0])
+                media_group.append(types.InputMediaUploadedDocument(
+                    file=await uploader.upload_file(video_parts[0]),
+                    mime_type='video/mp4',
+                    attributes=[types.DocumentAttributeVideo(
+                        duration=duration,
+                        w=width,
+                        h=height,
+                        supports_streaming=True
+                    )],
+                    thumb=await uploader.upload_file(thumb_file) if thumb_file else None,
+                    nosound_video=False
+                ))
+                
+                await uploader.send_file(TARGET_CHANNEL_ID, media_group)
+                
+                # If there are more video parts (split), send them separately
+                if len(video_parts) > 1:
+                    for i in range(1, len(video_parts)):
+                        part = video_parts[i]
+                        duration, width, height = get_video_info(part)
+                        caption = f"🎬 **{video_title} (Part {i+1}/{len(video_parts)})**"
+                        await uploader.send_file(
+                            TARGET_CHANNEL_ID, part, caption=caption,
+                            supports_streaming=True,
+                            attributes=[types.DocumentAttributeVideo(duration=duration, w=width, h=height, supports_streaming=True)]
+                        )
+
+            # MODE: Separate Album then Video (Original 'both' mode)
+            elif POST_MODE == 'both':
+                if screenshots:
+                    photo_caption = f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
+                    await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
+                
                 for i, part in enumerate(video_parts):
                     duration, width, height = get_video_info(part)
-                    part_caption_suffix = f" (Part {i+1}/{len(video_parts)})" if len(video_parts) > 1 else ""
-                    video_caption = f"🎬 **{video_title}{part_caption_suffix}**\n\n{VIDEO_CAPTION_TEMPLATE}"
+                    part_suffix = f" (Part {i+1}/{len(video_parts)})" if len(video_parts) > 1 else ""
+                    video_caption = f"🎬 **{video_title}{part_suffix}**\n\n{VIDEO_CAPTION_TEMPLATE}"
                     await uploader.send_file(
-                        TARGET_CHANNEL_ID, 
-                        part, 
-                        caption=video_caption, 
-                        thumb=thumb_file if i == 0 else None, # Only send thumbnail for the first part
-                        parse_mode='markdown', 
-                        supports_streaming=True,
-                        attributes=[types.DocumentAttributeVideo(
-                            duration=duration,
-                            w=width,
-                            h=height,
-                            supports_streaming=True
-                        )]
+                        TARGET_CHANNEL_ID, part, caption=video_caption,
+                        thumb=thumb_file if i == 0 else None,
+                        parse_mode='markdown', supports_streaming=True,
+                        attributes=[types.DocumentAttributeVideo(duration=duration, w=width, h=height, supports_streaming=True)]
                     )
+
+            # MODE: Album Only
+            elif POST_MODE == 'album' and screenshots:
+                photo_caption = f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
+                await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
+
         send_progress("✅ Task Completed Successfully!")
     except Exception as e:
         send_progress(f"❌ Upload Error: {str(e)}")
