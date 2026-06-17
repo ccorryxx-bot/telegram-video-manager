@@ -30,4 +30,5 @@ jobs:
           POST_MODE: ${{ github.event.client_payload.post_mode }}
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
           WORKER_URL: ${{ github.event.client_payload.worker_url }}
+          WORKFLOW_NAME: ${{ github.workflow }}
         run: python process_video.py

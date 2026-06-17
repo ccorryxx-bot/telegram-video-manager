@@ -19,6 +19,7 @@ NUM_PHOTOS = int(os.environ.get('NUM_PHOTOS', '4'))
 POST_MODE = os.environ.get('POST_MODE', 'both')
 CHAT_ID = os.environ.get('CHAT_ID', '')
 WORKER_URL = os.environ.get('WORKER_URL', '')
+WORKFLOW_NAME = os.environ.get('WORKFLOW_NAME', 'Unknown Workflow')
 MAX_FILE_SIZE_MB = 2000 # 2GB in MB
 TARGET_RESOLUTION = os.environ.get('TARGET_RESOLUTION', '720p') # Default to 720p
 
@@ -36,12 +37,13 @@ except ValueError:
     sys.exit(1)
 
 def send_progress(text):
-    print(text)
+    full_text = f"[{WORKFLOW_NAME}]\n{text}"
+    print(full_text)
     if CHAT_ID and WORKER_URL:
         try:
             requests.post(WORKER_URL, json={
                 "chat_id": CHAT_ID,
-                "progress_text": text
+                "progress_text": full_text
             })
         except: pass
 
