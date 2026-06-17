@@ -195,7 +195,7 @@ async def main():
                 else: vf += ",scale='trunc(iw/2)*2:trunc(ih/2)*2'"
             subprocess.run([
                 'ffmpeg', '-y', '-i', raw_video, '-vf', vf,
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
                 '-c:a', 'aac', '-b:a', '128k', '-pix_fmt', 'yuv420p',
                 '-movflags', '+faststart', final_video
             ], check=True, capture_output=True)
@@ -225,7 +225,7 @@ async def main():
 
         # ── 5. Upload via Telethon Public API ──────────────────────────────────
         send_progress("🚀 Connecting to Telegram...")
-        client = TelegramClient('bot_session', int(API_ID), API_HASH)
+        client = TelegramClient('bot_session', int(API_ID), API_HASH, connection_retries=None, request_retries=5)
         await client.start(bot_token=BOT_TOKEN)
 
         async with client:
