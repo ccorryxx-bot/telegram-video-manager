@@ -8,7 +8,8 @@ import requests
 import traceback
 import time
 import math
-from telethon import TelegramClient, types, utils
+from telethon import TelegramClient
+from telethon.tl import types, functions
 
 API_ID = int(os.environ.get('API_ID', '0'))
 API_HASH = os.environ.get('API_HASH', '')
@@ -95,6 +96,7 @@ async def fast_upload(client, file_path, connections=8):
     file_size = os.path.getsize(file_path)
     part_size = 512 * 1024
     parts_count = math.ceil(file_size / part_size)
+    # Use os.urandom instead of deprecated utils.generate_random_long()
     file_id = int.from_bytes(os.urandom(8), 'little', signed=True)
     is_large = file_size > 10 * 1024 * 1024
 
@@ -103,10 +105,10 @@ async def fast_upload(client, file_path, connections=8):
         for i in range(parts_count):
             chunk = f.read(part_size)
             if is_large:
-                pool.append(client(types.functions.upload.SaveBigFilePartRequest(
+                pool.append(client(functions.upload.SaveBigFilePartRequest(
                     file_id=file_id, file_part=i, file_total_parts=parts_count, bytes=chunk)))
             else:
-                pool.append(client(types.functions.upload.SaveFilePartRequest(
+                pool.append(client(functions.upload.SaveFilePartRequest(
                     file_id=file_id, file_part=i, bytes=chunk)))
             if len(pool) >= connections:
                 await asyncio.gather(*pool)
@@ -136,7 +138,6 @@ async def main():
         def download_video():
             cmd = ['yt-dlp', '-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4',
                    '--impersonate', 'chrome', '-o', raw_video, VIDEO_URL]
-            # Add credentials if available (for login-required sites like PornHub)
             if PH_USERNAME and PH_PASSWORD:
                 cmd += ['--username', PH_USERNAME, '--password', PH_PASSWORD]
             process = subprocess.run(cmd, capture_output=True, text=True)
@@ -220,10 +221,12 @@ async def main():
                     media_group = []
                     for i, m in enumerate(media):
                         cap = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
-                        media_group.append(types.InputMediaUploadedPhoto(file=m, caption=cap, parse_mode='markdown'))
+                        media_group.append(types.InputMediaUploadedPhoto(
+                            file=m, caption=cap, parse_mode='markdown'))
                     media_group.append(types.InputMediaUploadedDocument(
                         file=video_file, mime_type='video/mp4',
-                        attributes=[types.DocumentAttributeVideo(duration=v_dur, w=v_w, h=v_h, supports_streaming=True)],
+                        attributes=[types.DocumentAttributeVideo(
+                            duration=v_dur, w=v_w, h=v_h, supports_streaming=True)],
                         thumb=await uploader.upload_file(thumb_file) if thumb_file else None
                     ))
                     await uploader.send_file(TARGET_CHANNEL_ID, media_group)
@@ -231,19 +234,23 @@ async def main():
                 elif POST_MODE == 'both':
                     if screenshots:
                         await uploader.send_file(TARGET_CHANNEL_ID, screenshots,
-                            caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}", parse_mode='markdown')
+                            caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}",
+                            parse_mode='markdown')
                     for i, part in enumerate(video_parts):
                         d, w, h = get_video_info(part)
                         suffix = f" (Part {i+1}/{len(video_parts)})" if len(video_parts) > 1 else ""
                         cap = f"🎬 **{video_title}{suffix}**\n\n{VIDEO_CAPTION_TEMPLATE}"
                         await uploader.send_file(
-                            TARGET_CHANNEL_ID, await fast_upload(uploader, part), caption=cap,
-                            thumb=thumb_file if i == 0 else None, parse_mode='markdown',
-                            attributes=[types.DocumentAttributeVideo(duration=d, w=w, h=h, supports_streaming=True)])
+                            TARGET_CHANNEL_ID, await fast_upload(uploader, part),
+                            caption=cap, thumb=thumb_file if i == 0 else None,
+                            parse_mode='markdown',
+                            attributes=[types.DocumentAttributeVideo(
+                                duration=d, w=w, h=h, supports_streaming=True)])
 
                 elif POST_MODE == 'album' and screenshots:
                     await uploader.send_file(TARGET_CHANNEL_ID, screenshots,
-                        caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}", parse_mode='markdown')
+                        caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}",
+                        parse_mode='markdown')
 
             await retry_async(upload_logic)
 
