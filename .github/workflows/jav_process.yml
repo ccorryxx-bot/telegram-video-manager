@@ -33,4 +33,5 @@ jobs:
           WORKFLOW_NAME: ${{ github.workflow }}
           PH_USERNAME: ${{ secrets.PH_USERNAME }}
           PH_PASSWORD: ${{ secrets.PH_PASSWORD }}
+          PH_COOKIES_B64: ${{ secrets.PH_COOKIES_B64 }}
         run: python process_video.py
