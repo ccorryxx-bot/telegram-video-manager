@@ -114,21 +114,28 @@ async def main():
     try:
         # 1. Download using yt-dlp
         try:
+            # Simplified format to avoid syntax issues with special characters
+            # Using 'bestvideo+bestaudio/best' which is more robust
             cmd = [
                 'yt-dlp', 
-                '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4', 
+                '-f', 'bestvideo+bestaudio/best', 
                 '--merge-output-format', 'mp4',
                 '-o', raw_video,
                 VIDEO_URL
             ]
-            subprocess.run(cmd, check=True)
+            # Capture stderr to provide detailed error messages
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if process.returncode != 0:
+                error_detail = process.stderr if process.stderr else "Unknown error"
+                send_progress(f"❌ Download Error Details:\n{error_detail}")
+                return
             
             title_cmd = ['yt-dlp', '--get-title', VIDEO_URL]
             title_res = subprocess.run(title_cmd, capture_output=True, text=True)
             if title_res.returncode == 0:
                 video_title = title_res.stdout.strip()
         except Exception as e:
-            send_progress(f"❌ Download Error: {str(e)}")
+            send_progress(f"❌ Critical Download Exception: {str(e)}")
             return
 
         if not os.path.exists(raw_video):
