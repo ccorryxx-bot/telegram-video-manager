@@ -8,10 +8,8 @@ import requests
 import traceback
 import time
 import math
-import random
 from telethon import TelegramClient, types, utils
 
-# Environment Variables
 API_ID = int(os.environ.get('API_ID', '0'))
 API_HASH = os.environ.get('API_HASH', '')
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
@@ -23,10 +21,11 @@ POST_MODE = os.environ.get('POST_MODE', 'both')
 CHAT_ID = os.environ.get('CHAT_ID', '')
 WORKER_URL = os.environ.get('WORKER_URL', '')
 WORKFLOW_NAME = os.environ.get('WORKFLOW_NAME', 'Unknown Workflow')
-MAX_FILE_SIZE_MB = 2000 # 2GB in MB
+MAX_FILE_SIZE_MB = 2000
 TARGET_RESOLUTION = os.environ.get('TARGET_RESOLUTION', '720p')
+PH_USERNAME = os.environ.get('PH_USERNAME', '')
+PH_PASSWORD = os.environ.get('PH_PASSWORD', '')
 
-# Target Channel ID
 raw_channel_id = os.environ.get('TARGET_CHANNEL_ID', '0').strip()
 try:
     if raw_channel_id.startswith('-100'):
@@ -44,18 +43,12 @@ def send_progress(text):
     print(full_text)
     if CHAT_ID and WORKER_URL:
         try:
-            requests.post(WORKER_URL, json={
-                "chat_id": CHAT_ID,
-                "progress_text": full_text
-            })
+            requests.post(WORKER_URL, json={"chat_id": CHAT_ID, "progress_text": full_text}, timeout=10)
         except: pass
 
 def get_video_info(file_path):
     try:
-        cmd = [
-            'ffprobe', '-v', 'quiet', '-print_format', 'json', 
-            '-show_format', '-show_streams', file_path
-        ]
+        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', file_path]
         result = subprocess.run(cmd, capture_output=True, text=True)
         data = json.loads(result.stdout)
         duration = int(float(data['format']['duration']))
@@ -90,10 +83,8 @@ def retry_sync(func, *args, retries=3, delay=5, **kwargs):
 
 def capture_screenshot(video_path, time_pos, output_path):
     try:
-        cmd = [
-            'ffmpeg', '-y', '-ss', str(time_pos), '-i', video_path,
-            '-frames:v', '1', '-update', '1', '-q:v', '2', output_path
-        ]
+        cmd = ['ffmpeg', '-y', '-ss', str(time_pos), '-i', video_path,
+               '-frames:v', '1', '-update', '1', '-q:v', '2', output_path]
         subprocess.run(cmd, check=True, capture_output=True)
         return os.path.exists(output_path) and os.path.getsize(output_path) > 0
     except Exception as e:
@@ -104,29 +95,25 @@ async def fast_upload(client, file_path, connections=8):
     file_size = os.path.getsize(file_path)
     part_size = 512 * 1024
     parts_count = math.ceil(file_size / part_size)
-    # Fix: generate_random_long removed in newer Telethon — use os.urandom instead
     file_id = int.from_bytes(os.urandom(8), 'little', signed=True)
     is_large = file_size > 10 * 1024 * 1024
-    
+
     with open(file_path, 'rb') as f:
         pool = []
         for i in range(parts_count):
             chunk = f.read(part_size)
             if is_large:
                 pool.append(client(types.functions.upload.SaveBigFilePartRequest(
-                    file_id=file_id, file_part=i, file_total_parts=parts_count, bytes=chunk
-                )))
+                    file_id=file_id, file_part=i, file_total_parts=parts_count, bytes=chunk)))
             else:
                 pool.append(client(types.functions.upload.SaveFilePartRequest(
-                    file_id=file_id, file_part=i, bytes=chunk
-                )))
-            
+                    file_id=file_id, file_part=i, bytes=chunk)))
             if len(pool) >= connections:
                 await asyncio.gather(*pool)
                 pool = []
         if pool:
             await asyncio.gather(*pool)
-            
+
     if is_large:
         return types.InputFileBig(id=file_id, parts=parts_count, name=os.path.basename(file_path))
     else:
@@ -135,7 +122,7 @@ async def fast_upload(client, file_path, connections=8):
 async def main():
     if not VIDEO_URL:
         print("No VIDEO_URL provided.")
-        return
+        sys.exit(1)
 
     send_progress(f"📥 Downloading: {VIDEO_URL}")
     raw_video = 'raw_video.mp4'
@@ -147,18 +134,23 @@ async def main():
 
     try:
         def download_video():
-            cmd = [
-                'yt-dlp', '-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4',
-                '--impersonate', 'chrome', '-o', raw_video, VIDEO_URL
-            ]
+            cmd = ['yt-dlp', '-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4',
+                   '--impersonate', 'chrome', '-o', raw_video, VIDEO_URL]
+            # Add credentials if available (for login-required sites like PornHub)
+            if PH_USERNAME and PH_PASSWORD:
+                cmd += ['--username', PH_USERNAME, '--password', PH_PASSWORD]
             process = subprocess.run(cmd, capture_output=True, text=True)
             if process.returncode != 0:
                 raise Exception(f"yt-dlp failed: {process.stderr}")
             return True
 
         retry_sync(download_video)
-        
-        title_res = subprocess.run(['yt-dlp', '--get-title', VIDEO_URL], capture_output=True, text=True)
+
+        title_cmd = ['yt-dlp', '--get-title']
+        if PH_USERNAME and PH_PASSWORD:
+            title_cmd += ['--username', PH_USERNAME, '--password', PH_PASSWORD]
+        title_cmd.append(VIDEO_URL)
+        title_res = subprocess.run(title_cmd, capture_output=True, text=True)
         if title_res.returncode == 0:
             video_title = title_res.stdout.strip()
 
@@ -175,7 +167,7 @@ async def main():
                 shot_path = f'screenshot_{i}.jpg'
                 if capture_screenshot(raw_video, shot_pos, shot_path):
                     screenshots.append(shot_path)
-        
+
         send_progress("⚙️ Processing video (Pro Mode: Fast-Start & Dynamic Res)...")
         try:
             watermark_text = "V3 PREMIUM"
@@ -184,7 +176,7 @@ async def main():
                 if TARGET_RESOLUTION == '1080p' and height >= 1080: vf += ",scale=-2:1080"
                 elif TARGET_RESOLUTION == '720p' and height >= 720: vf += ",scale=-2:720"
                 else: vf += ",scale='trunc(iw/2)*2:trunc(ih/2)*2'"
-            
+
             subprocess.run([
                 'ffmpeg', '-y', '-i', raw_video, '-vf', vf,
                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
@@ -217,22 +209,18 @@ async def main():
         async with uploader:
             has_thumb = os.path.exists(thumbnail)
             thumb_file = thumbnail if has_thumb else None
-            
+
             async def upload_logic():
                 if POST_MODE == 'video':
                     media = []
                     for i, img in enumerate(screenshots):
-                        cap = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
                         media.append(await uploader.upload_file(img))
-                    
                     v_dur, v_w, v_h = get_video_info(video_parts[0])
                     video_file = await fast_upload(uploader, video_parts[0])
-                    
                     media_group = []
                     for i, m in enumerate(media):
                         cap = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
                         media_group.append(types.InputMediaUploadedPhoto(file=m, caption=cap, parse_mode='markdown'))
-                    
                     media_group.append(types.InputMediaUploadedDocument(
                         file=video_file, mime_type='video/mp4',
                         attributes=[types.DocumentAttributeVideo(duration=v_dur, w=v_w, h=v_h, supports_streaming=True)],
@@ -242,7 +230,8 @@ async def main():
 
                 elif POST_MODE == 'both':
                     if screenshots:
-                        await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}", parse_mode='markdown')
+                        await uploader.send_file(TARGET_CHANNEL_ID, screenshots,
+                            caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}", parse_mode='markdown')
                     for i, part in enumerate(video_parts):
                         d, w, h = get_video_info(part)
                         suffix = f" (Part {i+1}/{len(video_parts)})" if len(video_parts) > 1 else ""
@@ -250,10 +239,11 @@ async def main():
                         await uploader.send_file(
                             TARGET_CHANNEL_ID, await fast_upload(uploader, part), caption=cap,
                             thumb=thumb_file if i == 0 else None, parse_mode='markdown',
-                            attributes=[types.DocumentAttributeVideo(duration=d, w=w, h=h, supports_streaming=True)]
-                        )
+                            attributes=[types.DocumentAttributeVideo(duration=d, w=w, h=h, supports_streaming=True)])
+
                 elif POST_MODE == 'album' and screenshots:
-                    await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}", parse_mode='markdown')
+                    await uploader.send_file(TARGET_CHANNEL_ID, screenshots,
+                        caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}", parse_mode='markdown')
 
             await retry_async(upload_logic)
 
@@ -273,6 +263,7 @@ async def main():
         )
         print(stack_trace)
         send_progress(error_msg)
+        sys.exit(1)
     finally:
         files = [raw_video, final_video, thumbnail, 'last_resort.jpg'] + screenshots + video_parts
         for f in files:
