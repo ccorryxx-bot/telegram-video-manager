@@ -1,7 +1,7 @@
 name: Process Video V4 (Jav V3)
 on:
   repository_dispatch:
-    types: [process_video_v4]
+    types: [jav_process]
 jobs:
   process:
     runs-on: ubuntu-latest
