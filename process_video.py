@@ -218,20 +218,31 @@ async def main():
             
             async def upload_logic():
                 if POST_MODE == 'video':
-                    media_group = []
+                    # ROBUST APPROACH: Let Telethon handle the media types
+                    # Upload screenshots and video part 1
+                    media = []
                     for i, img in enumerate(screenshots):
                         cap = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
-                        media_group.append(types.InputMediaUploadedPhoto(
-                            file=await fast_upload(uploader, img), caption=cap, parse_mode='markdown'
-                        ))
+                        media.append(await uploader.upload_file(img))
+                    
+                    # Add video part 1
                     v_dur, v_w, v_h = get_video_info(video_parts[0])
+                    video_file = await fast_upload(uploader, video_parts[0])
+                    
+                    # Send as album
+                    # For albums, we need to wrap them in InputMedia
+                    media_group = []
+                    for i, m in enumerate(media):
+                        cap = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
+                        media_group.append(types.InputMediaUploadedPhoto(file=m, caption=cap, parse_mode='markdown'))
+                    
                     media_group.append(types.InputMediaUploadedDocument(
-                        file=await fast_upload(uploader, video_parts[0]),
-                        mime_type='video/mp4',
+                        file=video_file, mime_type='video/mp4',
                         attributes=[types.DocumentAttributeVideo(duration=v_dur, w=v_w, h=v_h, supports_streaming=True)],
                         thumb=await uploader.upload_file(thumb_file) if thumb_file else None
                     ))
                     await uploader.send_file(TARGET_CHANNEL_ID, media_group)
+
                 elif POST_MODE == 'both':
                     if screenshots:
                         await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}", parse_mode='markdown')
