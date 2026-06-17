@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libsm6 libxext6
-          pip install yt-dlp opencv-python telethon requests
+          pip install -U yt-dlp opencv-python telethon requests
       - name: Run processor
         env:
           API_ID: ${{ secrets.TG_API_ID }}
