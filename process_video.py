@@ -235,7 +235,7 @@ async def main():
 
             # MODE: Combined Album + Video
             if POST_MODE == 'video':
-                                media_group = []
+                media_group = []
                 for i, img in enumerate(screenshots):
                     caption = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
                     # Telethon's InputMediaPhoto uses 'media' instead of 'file' in newer versions
