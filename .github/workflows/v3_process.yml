@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libsm6 libxext6
-          pip install -U yt-dlp opencv-python telethon requests brotli curl_cffi
+          pip install yt-dlp==2026.6.9 opencv-python==4.13.0.92 telethon==1.44.0 requests==2.34.2 brotli curl_cffi
       - name: Run processor
         env:
           API_ID: ${{ secrets.TG_API_ID }}
@@ -31,4 +31,6 @@ jobs:
           CHAT_ID: ${{ github.event.client_payload.chat_id }}
           WORKER_URL: ${{ github.event.client_payload.worker_url }}
           WORKFLOW_NAME: ${{ github.workflow }}
+          PH_USERNAME: ${{ secrets.PH_USERNAME }}
+          PH_PASSWORD: ${{ secrets.PH_PASSWORD }}
         run: python process_video.py
