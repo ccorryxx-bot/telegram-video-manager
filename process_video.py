@@ -235,11 +235,11 @@ async def main():
 
             # MODE: Combined Album + Video
             if POST_MODE == 'video':
-                media_group = []
+                                media_group = []
                 for i, img in enumerate(screenshots):
                     caption = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
-                    media_group.append(types.InputMediaPhoto(file=img, caption=caption, parse_mode='markdown'))
-                
+                    # Telethon's InputMediaPhoto uses 'media' instead of 'file' in newer versions
+                    media_group.append(types.InputMediaPhoto(media=img, caption=caption, parse_mode='markdown'))
                 # Add first video part
                 v_duration, v_width, v_height = get_video_info(video_parts[0])
                 media_group.append(types.InputMediaUploadedDocument(
@@ -268,6 +268,7 @@ async def main():
             elif POST_MODE == 'both':
                 if screenshots:
                     photo_caption = f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}"
+                    # For send_file with multiple files, Telethon handles it as an album
                     await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=photo_caption, parse_mode='markdown')
                 
                 for i, part in enumerate(video_parts):
