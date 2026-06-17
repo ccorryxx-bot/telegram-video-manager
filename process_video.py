@@ -26,6 +26,7 @@ TARGET_RESOLUTION   = os.environ.get('TARGET_RESOLUTION', '720p')
 MAX_FILE_SIZE_MB    = 2000
 PH_USERNAME         = os.environ.get('PH_USERNAME', '')
 PH_PASSWORD         = os.environ.get('PH_PASSWORD', '')
+PH_COOKIES_B64      = os.environ.get('PH_COOKIES_B64', '')
 
 # ── Channel ID parse ───────────────────────────────────────────────────────────
 def parse_channel_id(raw):
@@ -104,17 +105,36 @@ def classify_download_error(stderr):
         return "↩️ Redirect detected — video ကို login မှ ကြည့်ရတာဖြစ်နိုင်တယ်"
     return f"❌ Download failed:\n{stderr[:300]}"
 
+# ── Cookies setup ─────────────────────────────────────────────────────────────
+def setup_cookies():
+    """Decode PH_COOKIES_B64 secret → cookies.txt file. Returns path or None."""
+    if not PH_COOKIES_B64:
+        return None
+    try:
+        import base64
+        content = base64.b64decode(PH_COOKIES_B64).decode()
+        path = '/tmp/ph_cookies.txt'
+        with open(path, 'w') as f:
+            f.write(content)
+        send_progress("🍪 Cookies loaded from secret")
+        return path
+    except Exception as e:
+        print(f"Cookies decode error: {e}")
+        return None
+
 # ── Download with 3 fallback strategies ───────────────────────────────────────
 def download_video(raw_video):
-    base_cmd = ['yt-dlp', '--merge-output-format', 'mp4', '-o', raw_video]
-    creds    = ['--username', PH_USERNAME, '--password', PH_PASSWORD] if PH_USERNAME and PH_PASSWORD else []
+    base_cmd  = ['yt-dlp', '--merge-output-format', 'mp4', '-o', raw_video]
+    cookies_path = setup_cookies()
+    cookie_args  = ['--cookies', cookies_path] if cookies_path else []
+    creds        = ['--username', PH_USERNAME, '--password', PH_PASSWORD] if PH_USERNAME and PH_PASSWORD and not cookies_path else []
 
     strategies = [
-        # 1. Best quality + browser impersonation + credentials
-        base_cmd + ['-f', 'bestvideo+bestaudio/best', '--impersonate', 'chrome'] + creds + [VIDEO_URL],
-        # 2. Any available format + credentials (relaxed)
-        base_cmd + ['-f', 'best'] + creds + [VIDEO_URL],
-        # 3. Fallback: no impersonation, no format preference
+        # 1. Cookies + best quality + chrome impersonation (most reliable)
+        base_cmd + cookie_args + ['-f', 'bestvideo+bestaudio/best', '--impersonate', 'chrome'] + [VIDEO_URL],
+        # 2. Cookies + any format (relaxed)
+        base_cmd + cookie_args + [VIDEO_URL],
+        # 3. Username/password fallback (no cookies)
         base_cmd + creds + [VIDEO_URL],
     ]
 
@@ -123,6 +143,7 @@ def download_video(raw_video):
         send_progress(f"📥 Download strategy {i}/3 ...")
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode == 0 and os.path.exists(raw_video):
+            send_progress(f"✅ Downloaded (strategy {i})")
             return True
         last_err = r.stderr
         print(f"Strategy {i} failed: {last_err[:200]}")
@@ -130,8 +151,10 @@ def download_video(raw_video):
     raise Exception(classify_download_error(last_err))
 
 def get_title(video_url):
-    creds = ['--username', PH_USERNAME, '--password', PH_PASSWORD] if PH_USERNAME and PH_PASSWORD else []
-    r = subprocess.run(['yt-dlp', '--get-title'] + creds + [video_url], capture_output=True, text=True)
+    cookies_path = '/tmp/ph_cookies.txt' if os.path.exists('/tmp/ph_cookies.txt') else None
+    cookie_args  = ['--cookies', cookies_path] if cookies_path else []
+    creds        = ['--username', PH_USERNAME, '--password', PH_PASSWORD] if PH_USERNAME and PH_PASSWORD and not cookies_path else []
+    r = subprocess.run(['yt-dlp', '--get-title'] + cookie_args + creds + [video_url], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "Premium Video"
 
 # ── Main ───────────────────────────────────────────────────────────────────────
