@@ -8,6 +8,7 @@ import requests
 import traceback
 import time
 import math
+import random
 from telethon import TelegramClient, types, utils
 
 # Environment Variables
@@ -103,7 +104,8 @@ async def fast_upload(client, file_path, connections=8):
     file_size = os.path.getsize(file_path)
     part_size = 512 * 1024
     parts_count = math.ceil(file_size / part_size)
-    file_id = utils.generate_random_long()
+    # Fix: generate_random_long removed in newer Telethon — use os.urandom instead
+    file_id = int.from_bytes(os.urandom(8), 'little', signed=True)
     is_large = file_size > 10 * 1024 * 1024
     
     with open(file_path, 'rb') as f:
@@ -218,19 +220,14 @@ async def main():
             
             async def upload_logic():
                 if POST_MODE == 'video':
-                    # ROBUST APPROACH: Let Telethon handle the media types
-                    # Upload screenshots and video part 1
                     media = []
                     for i, img in enumerate(screenshots):
                         cap = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
                         media.append(await uploader.upload_file(img))
                     
-                    # Add video part 1
                     v_dur, v_w, v_h = get_video_info(video_parts[0])
                     video_file = await fast_upload(uploader, video_parts[0])
                     
-                    # Send as album
-                    # For albums, we need to wrap them in InputMedia
                     media_group = []
                     for i, m in enumerate(media):
                         cap = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
