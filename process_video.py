@@ -210,21 +210,27 @@ async def main():
 
             send_progress("📤 Uploading...")
 
+            def album_captions(files, last_caption):
+                """Telethon album: caption list required — only last item gets text."""
+                caps = [''] * (len(files) - 1) + [last_caption]
+                return caps
+
             if POST_MODE == 'album':
                 # Photos only
                 if screenshots:
+                    caps = album_captions(screenshots, f"📸 **{video_title}**\n\n{PHOTO_CAPTION}")
                     await client.send_file(
                         TARGET_CHANNEL_ID, screenshots,
-                        caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION}",
-                        parse_mode='markdown')
+                        caption=caps, parse_mode='markdown')
+                    send_progress("✅ Photos uploaded")
 
             elif POST_MODE == 'both':
                 # Photos first, then video separately
                 if screenshots:
+                    caps = album_captions(screenshots, f"📸 **{video_title}**\n\n{PHOTO_CAPTION}")
                     await client.send_file(
                         TARGET_CHANNEL_ID, screenshots,
-                        caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION}",
-                        parse_mode='markdown')
+                        caption=caps, parse_mode='markdown')
                     send_progress("✅ Photos uploaded")
 
                 for i, part in enumerate(video_parts):
@@ -245,10 +251,10 @@ async def main():
                 media = screenshots[:]
                 media.append(video_parts[0])
                 dur, w, h = get_video_info(video_parts[0])
+                caps = album_captions(media, f"🎬 **{video_title}**\n\n{VIDEO_CAPTION}")
                 await client.send_file(
                     TARGET_CHANNEL_ID, media,
-                    caption=f"🎬 **{video_title}**\n\n{VIDEO_CAPTION}",
-                    parse_mode='markdown',
+                    caption=caps, parse_mode='markdown',
                     supports_streaming=True)
 
         send_progress("✅ Task Completed Successfully!")
