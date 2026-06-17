@@ -70,7 +70,6 @@ def get_video_info(file_path):
         return 0, 0, 0
 
 async def retry_async(func, *args, retries=3, delay=5, **kwargs):
-    """Retry an async function multiple times."""
     for i in range(retries):
         try:
             return await func(*args, **kwargs)
@@ -80,7 +79,6 @@ async def retry_async(func, *args, retries=3, delay=5, **kwargs):
             await asyncio.sleep(delay)
 
 def retry_sync(func, *args, retries=3, delay=5, **kwargs):
-    """Retry a sync function multiple times."""
     for i in range(retries):
         try:
             return func(*args, **kwargs)
@@ -146,7 +144,6 @@ async def main():
     video_parts = []
 
     try:
-        # 1. Download with Retry
         def download_video():
             cmd = [
                 'yt-dlp', '-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4',
@@ -166,47 +163,36 @@ async def main():
         if not os.path.exists(raw_video):
             raise Exception("Download failed: File not found.")
 
-        # 2. Screenshots
         send_progress("📸 Generating screenshots...")
         duration, width, height = get_video_info(raw_video)
         if duration > 0:
             thumb_pos = duration * 0.1
             capture_screenshot(raw_video, thumb_pos, thumbnail)
-            
             for i in range(1, NUM_PHOTOS + 1):
                 shot_pos = (duration / (NUM_PHOTOS + 1)) * i
                 shot_path = f'screenshot_{i}.jpg'
                 if capture_screenshot(raw_video, shot_pos, shot_path):
                     screenshots.append(shot_path)
         
-        # 3. Watermark & Compression with Fast-Start & Dynamic Res
         send_progress("⚙️ Processing video (Pro Mode: Fast-Start & Dynamic Res)...")
         try:
             watermark_text = "V3 PREMIUM"
             vf = f"drawtext=text='{watermark_text}':x=10:y=10:fontsize=24:fontcolor=white@0.5:box=1:boxcolor=black@0.2"
-            
-            # Dynamic Resolution Logic
             if height > 0:
-                if TARGET_RESOLUTION == '1080p' and height >= 1080:
-                    vf += ",scale=-2:1080"
-                elif TARGET_RESOLUTION == '720p' and height >= 720:
-                    vf += ",scale=-2:720"
-                else:
-                    # If source is smaller than target, keep source resolution but ensure even dimensions
-                    vf += ",scale='trunc(iw/2)*2:trunc(ih/2)*2'"
+                if TARGET_RESOLUTION == '1080p' and height >= 1080: vf += ",scale=-2:1080"
+                elif TARGET_RESOLUTION == '720p' and height >= 720: vf += ",scale=-2:720"
+                else: vf += ",scale='trunc(iw/2)*2:trunc(ih/2)*2'"
             
             subprocess.run([
                 'ffmpeg', '-y', '-i', raw_video, '-vf', vf,
                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
                 '-c:a', 'aac', '-b:a', '128k', '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart', # Fast-Start for Streaming
-                final_video
+                '-movflags', '+faststart', final_video
             ], check=True, capture_output=True)
         except Exception as e:
             send_progress(f"⚠️ Processing Warning: {str(e)}. Using raw video.")
             final_video = raw_video
 
-        # 4. Auto-Split
         video_parts = [final_video]
         file_size_mb = os.path.getsize(final_video) / (1024 * 1024)
         if file_size_mb > MAX_FILE_SIZE_MB:
@@ -223,7 +209,6 @@ async def main():
                 ], check=True)
                 video_parts.append(part_file)
 
-        # 5. Upload with Retry & Parallel Mode
         send_progress("🚀 Uploading to Telegram (Pro Mode)...")
         uploader = TelegramClient('bot_uploader', API_ID, API_HASH)
         await uploader.start(bot_token=BOT_TOKEN)
@@ -236,7 +221,9 @@ async def main():
                     media_group = []
                     for i, img in enumerate(screenshots):
                         cap = f"📸🎬 **{video_title}**\n\n{VIDEO_CAPTION_TEMPLATE}" if i == 0 else ""
-                        media_group.append(types.InputMediaPhoto(media=await fast_upload(uploader, img), caption=cap, parse_mode='markdown'))
+                        media_group.append(types.InputMediaUploadedPhoto(
+                            file=await fast_upload(uploader, img), caption=cap, parse_mode='markdown'
+                        ))
                     v_dur, v_w, v_h = get_video_info(video_parts[0])
                     media_group.append(types.InputMediaUploadedDocument(
                         file=await fast_upload(uploader, video_parts[0]),
@@ -245,7 +232,6 @@ async def main():
                         thumb=await uploader.upload_file(thumb_file) if thumb_file else None
                     ))
                     await uploader.send_file(TARGET_CHANNEL_ID, media_group)
-
                 elif POST_MODE == 'both':
                     if screenshots:
                         await uploader.send_file(TARGET_CHANNEL_ID, screenshots, caption=f"📸 **{video_title}**\n\n{PHOTO_CAPTION_TEMPLATE}", parse_mode='markdown')
