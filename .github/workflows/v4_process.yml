@@ -1,0 +1,33 @@
+name: Process Video V4 (Jav V3)
+on:
+  repository_dispatch:
+    types: [process_video_v4]
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsm6 libxext6
+          pip install -U yt-dlp opencv-python telethon requests brotli curl_cffi
+      - name: Run processor
+        env:
+          API_ID: ${{ secrets.TG_API_ID }}
+          API_HASH: ${{ secrets.TG_API_HASH }}
+          BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TARGET_CHANNEL_ID: ${{ github.event.client_payload.target_channel_id }}
+          VIDEO_URL: ${{ github.event.client_payload.video_url }}
+          PHOTO_CAPTION: ${{ github.event.client_payload.photo_caption }}
+          VIDEO_CAPTION: ${{ github.event.client_payload.video_caption }}
+          NUM_PHOTOS: ${{ github.event.client_payload.num_photos }}
+          POST_MODE: ${{ github.event.client_payload.post_mode }}
+          CHAT_ID: ${{ github.event.client_payload.chat_id }}
+          WORKER_URL: ${{ github.event.client_payload.worker_url }}
+        run: python process_video.py
