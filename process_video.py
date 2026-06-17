@@ -188,7 +188,7 @@ async def main():
         # ── 3. Process (watermark + encode) ───────────────────────────────────
         send_progress("⚙️ Processing video...")
         try:
-            vf = "drawtext=text='PREMIUM':x=10:y=10:fontsize=24:fontcolor=white@0.5:box=1:boxcolor=black@0.2"
+            vf = "drawtext=text=' KYAWGYI FAMILYS ':x=10:y=10:fontsize=40:fontcolor=black@0.9:box=1:boxcolor=white@0.3"
             if height > 0:
                 if   TARGET_RESOLUTION == '1080p' and height >= 1080: vf += ",scale=-2:1080"
                 elif TARGET_RESOLUTION == '720p'  and height >= 720:  vf += ",scale=-2:720"
