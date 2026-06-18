@@ -185,21 +185,55 @@ async def main():
                     screenshots.append(path)
         send_progress(f"✅ {len(screenshots)} screenshots ready")
 
-        # ── 3. Process (watermark + encode) ───────────────────────────────────
+        # ── 3. Process (scrolling watermark bar + encode) ─────────────────────
         send_progress("⚙️ Processing video...")
         try:
-            vf = "drawtext=text=' KYAWGYI FAMILYS ':x=10:y=10:fontsize=40:fontcolor=black@0.9:box=1:boxcolor=white@0.3"
+            # ── Scale filter first (if needed) ────────────────────────────────
+            scale_filter = ""
             if height > 0:
-                if   TARGET_RESOLUTION == '1080p' and height >= 1080: vf += ",scale=-2:1080"
-                elif TARGET_RESOLUTION == '720p'  and height >= 720:  vf += ",scale=-2:720"
-                else: vf += ",scale='trunc(iw/2)*2:trunc(ih/2)*2'"
+                if   TARGET_RESOLUTION == '1080p' and height >= 1080: scale_filter = ",scale=-2:1080"
+                elif TARGET_RESOLUTION == '720p'  and height >= 720:  scale_filter = ",scale=-2:720"
+                else: scale_filter = ",scale=trunc(iw/2)*2:trunc(ih/2)*2"
+
+            # ── Watermark bar ──────────────────────────────────────────────────
+            # Full-width dark bar at top: ~7% of video height
+            # Text scrolls slowly from RIGHT → LEFT on top of bar
+            #
+            #  ┌────────────────────────────────────────┐
+            #  │████  KYAWGYI FAMILYS ←←←←←←←←  █████│  ← dark bar (7% height)
+            #  ├────────────────────────────────────────┤
+            #  │             video content              │
+            #  └────────────────────────────────────────┘
+            #
+            # bar_h   = 7% of frame height
+            # scroll  = right-to-left, 55 px/sec (slow)
+            # x formula: w - mod(t*55, w+tw)
+            #   → starts at right edge (x=w), moves left, loops when off-screen
+
+            bar_filter = (
+                "drawbox="
+                "x=0:y=0:w=iw:h=ih*7/100:"
+                "color=black@0.88:t=fill"
+            )
+            text_filter = (
+                "drawtext="
+                "text='    KYAWGYI FAMILYS    ':"
+                "x=w-mod(t*55\\,w+tw):"
+                "y=(ih*7/100-th)/2:"
+                "fontsize=ih*38/1000:"
+                "fontcolor=white@0.95:"
+                "fontface=Bold"
+            )
+
+            vf = f"{bar_filter},{text_filter}{scale_filter}"
+
             subprocess.run([
                 'ffmpeg', '-y', '-i', raw_video, '-vf', vf,
                 '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
                 '-c:a', 'aac', '-b:a', '128k', '-pix_fmt', 'yuv420p',
                 '-movflags', '+faststart', final_video
             ], check=True, capture_output=True)
-            send_progress("✅ Video processed (720p + watermark)")
+            send_progress("✅ Video processed — scrolling watermark bar applied")
         except Exception as e:
             send_progress(f"⚠️ Encode warning: {e} — raw video သုံးမယ်")
             final_video = raw_video
