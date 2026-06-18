@@ -221,8 +221,7 @@ async def main():
                 "x=w-mod(t*55\\,w+tw):"
                 "y=(ih*7/100-th)/2:"
                 "fontsize=ih*38/1000:"
-                "fontcolor=white@0.95:"
-                "fontface=Bold"
+                "fontcolor=white@0.95"
             )
 
             vf = f"{bar_filter},{text_filter}{scale_filter}"
