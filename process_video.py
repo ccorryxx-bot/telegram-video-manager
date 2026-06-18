@@ -299,16 +299,26 @@ async def main():
                     send_progress(f"✅ Video part {i+1}/{len(video_parts)} uploaded")
 
             elif POST_MODE == 'video':
-                # Photos + video in one album (Combined)
-                media = screenshots[:]
-                media.append(video_parts[0])
+                # Combined: photos album first, then video separately with thumb
+                # NOTE: Telethon cannot set thumb= for a video inside a mixed list album.
+                # The only reliable way to show a cover image is a dedicated send_file call.
+                if screenshots:
+                    caps = album_captions(screenshots, f"📸 **{video_title}**\n\n{PHOTO_CAPTION}")
+                    await client.send_file(
+                        TARGET_CHANNEL_ID, screenshots,
+                        caption=caps, parse_mode='markdown')
+                    send_progress("✅ Photos uploaded")
+
                 dur, w, h = get_video_info(video_parts[0])
-                caps = album_captions(media, f"🎬 **{video_title}**\n\n{VIDEO_CAPTION}")
                 await client.send_file(
-                    TARGET_CHANNEL_ID, media,
-                    caption=caps, parse_mode='markdown',
+                    TARGET_CHANNEL_ID, video_parts[0],
+                    caption=f"🎬 **{video_title}**\n\n{VIDEO_CAPTION}",
+                    parse_mode='markdown',
                     thumb=thumb,
-                    supports_streaming=True)
+                    supports_streaming=True,
+                    attributes=[types.DocumentAttributeVideo(
+                        duration=dur, w=w, h=h, supports_streaming=True)])
+                send_progress("✅ Video uploaded with thumbnail")
 
         send_progress("✅ Task Completed Successfully!")
 
