@@ -195,33 +195,29 @@ async def main():
                 elif TARGET_RESOLUTION == '720p'  and height >= 720:  scale_filter = ",scale=-2:720"
                 else: scale_filter = ",scale=trunc(iw/2)*2:trunc(ih/2)*2"
 
+            # ── Compute fixed pixel values (expression-based fails on some ffmpeg) ──
+            # Use actual video height, fallback to 720 if unknown
+            ref_h    = height if height > 0 else 720
+            bar_h    = max(40, int(ref_h * 0.07))       # 7% of height, min 40px
+            font_sz  = max(18, int(bar_h * 0.55))        # 55% of bar, min 18px
+            text_y   = max(4,  (bar_h - font_sz) // 2)  # vertically centered
+
             # ── Watermark bar ──────────────────────────────────────────────────
-            # Full-width dark bar at top: ~7% of video height
-            # Text scrolls slowly from RIGHT → LEFT on top of bar
-            #
             #  ┌────────────────────────────────────────┐
-            #  │████  KYAWGYI FAMILYS ←←←←←←←←  █████│  ← dark bar (7% height)
+            #  │████  KYAWGYI FAMILYS ←←←←←←←←  █████│  ← {bar_h}px dark bar
             #  ├────────────────────────────────────────┤
             #  │             video content              │
             #  └────────────────────────────────────────┘
-            #
-            # bar_h   = 7% of frame height
-            # scroll  = right-to-left, 55 px/sec (slow)
-            # x formula: w - mod(t*55, w+tw)
-            #   → starts at right edge (x=w), moves left, loops when off-screen
+            # scroll right→left at 55px/sec, loops continuously
 
-            bar_filter = (
-                "drawbox="
-                "x=0:y=0:w=iw:h=ih*7/100:"
-                "color=black@0.88:t=fill"
-            )
+            bar_filter  = f"drawbox=x=0:y=0:w=iw:h={bar_h}:color=black@0.88:t=fill"
             text_filter = (
-                "drawtext="
-                "text='    KYAWGYI FAMILYS    ':"
-                "x=w-mod(t*55\\,w+tw):"
-                "y=(ih*7/100-th)/2:"
-                "fontsize=ih*38/1000:"
-                "fontcolor=white@0.95"
+                f"drawtext="
+                f"text='    KYAWGYI FAMILYS    ':"
+                f"x=w-mod(t*55\\,w+tw):"
+                f"y={text_y}:"
+                f"fontsize={font_sz}:"
+                f"fontcolor=white@0.95"
             )
 
             vf = f"{bar_filter},{text_filter}{scale_filter}"
