@@ -299,7 +299,7 @@ async def main():
                     send_progress(f"✅ Video part {i+1}/{len(video_parts)} uploaded")
 
             elif POST_MODE == 'video':
-                # Photos + video in one album
+                # Photos + video in one album (Combined)
                 media = screenshots[:]
                 media.append(video_parts[0])
                 dur, w, h = get_video_info(video_parts[0])
@@ -307,6 +307,7 @@ async def main():
                 await client.send_file(
                     TARGET_CHANNEL_ID, media,
                     caption=caps, parse_mode='markdown',
+                    thumb=thumb,
                     supports_streaming=True)
 
         send_progress("✅ Task Completed Successfully!")
