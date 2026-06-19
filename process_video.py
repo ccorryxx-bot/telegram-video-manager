@@ -304,26 +304,28 @@ async def main():
                     send_progress(f"✅ Video part {i+1}/{len(video_parts)} uploaded")
 
             elif POST_MODE == 'video':
-                # Combined: photos album first, then video separately with thumb
-                # NOTE: Telethon cannot set thumb= for a video inside a mixed list album.
-                # The only reliable way to show a cover image is a dedicated send_file call.
-                if screenshots:
-                    caps = album_captions(screenshots, f"📸 **{video_title}**\n\n{PHOTO_CAPTION}")
-                    await client.send_file(
-                        TARGET_CHANNEL_ID, screenshots,
-                        caption=caps, parse_mode='markdown')
-                    send_progress("✅ Photos uploaded")
-
-                dur, w, h = get_video_info(video_parts[0])
+                # True Combined: photos + video ကို single media group အဖြစ် ပို့
+                # Telegram sendMediaGroup မှာ per-item custom thumb မရ —
+                # server ကိုယ်တိုင် video ကနေ auto-thumbnail generate လုပ်ပေးမယ်
+                all_files = screenshots + [video_parts[0]]
+                caps = [''] * (len(all_files) - 1) + [f"🎬 **{video_title}**\n\n{VIDEO_CAPTION}"]
                 await client.send_file(
-                    TARGET_CHANNEL_ID, video_parts[0],
-                    caption=f"🎬 **{video_title}**\n\n{VIDEO_CAPTION}",
-                    parse_mode='markdown',
-                    thumb=thumb,
-                    supports_streaming=True,
-                    attributes=[types.DocumentAttributeVideo(
-                        duration=dur, w=w, h=h, supports_streaming=True)])
-                send_progress("✅ Video uploaded with thumbnail")
+                    TARGET_CHANNEL_ID, all_files,
+                    caption=caps, parse_mode='markdown',
+                    supports_streaming=True)
+                send_progress("✅ Photos + Video combined group upload ပြီးပါပြီ")
+
+                # Split video ဆိုရင် ကျန်တဲ့ parts ကို သပ်သပ် ပို့
+                for i, part in enumerate(video_parts[1:], 2):
+                    dur2, w2, h2 = get_video_info(part)
+                    await client.send_file(
+                        TARGET_CHANNEL_ID, part,
+                        caption=f"🎬 **{video_title} (Part {i}/{len(video_parts)})**\n\n{VIDEO_CAPTION}",
+                        parse_mode='markdown',
+                        supports_streaming=True,
+                        attributes=[types.DocumentAttributeVideo(
+                            duration=dur2, w=w2, h=h2, supports_streaming=True)])
+                    send_progress(f"✅ Video part {i}/{len(video_parts)} uploaded")
 
         send_progress("✅ Task Completed Successfully!")
 
