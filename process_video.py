@@ -22,6 +22,7 @@ POST_MODE           = os.environ.get('POST_MODE', 'both')
 CHAT_ID             = os.environ.get('CHAT_ID', '')
 WORKER_URL          = os.environ.get('WORKER_URL', '')
 WORKFLOW_NAME       = os.environ.get('WORKFLOW_NAME', 'Unknown Workflow')
+SKIP_WATERMARK      = os.environ.get('SKIP_WATERMARK', 'false').lower() == 'true'
 TARGET_RESOLUTION   = os.environ.get('TARGET_RESOLUTION', '720p')
 MAX_FILE_SIZE_MB    = 2000
 PH_USERNAME         = os.environ.get('PH_USERNAME', '')
@@ -186,52 +187,56 @@ async def main():
         send_progress(f"✅ {len(screenshots)} screenshots ready")
 
         # ── 3. Process (scrolling watermark bar + encode) ─────────────────────
-        send_progress("⚙️ Processing video...")
-        try:
-            # ── Scale filter first (if needed) ────────────────────────────────
-            scale_filter = ""
-            if height > 0:
-                if   TARGET_RESOLUTION == '1080p' and height >= 1080: scale_filter = ",scale=-2:1080"
-                elif TARGET_RESOLUTION == '720p'  and height >= 720:  scale_filter = ",scale=-2:720"
-                else: scale_filter = ",scale=trunc(iw/2)*2:trunc(ih/2)*2"
-
-            # ── Compute fixed pixel values (expression-based fails on some ffmpeg) ──
-            # Use actual video height, fallback to 720 if unknown
-            ref_h    = height if height > 0 else 720
-            bar_h    = max(40, int(ref_h * 0.07))       # 7% of height, min 40px
-            font_sz  = max(18, int(bar_h * 0.55))        # 55% of bar, min 18px
-            text_y   = max(4,  (bar_h - font_sz) // 2)  # vertically centered
-
-            # ── Watermark bar ──────────────────────────────────────────────────
-            #  ┌────────────────────────────────────────┐
-            #  │████  KYAWGYI FAMILYS ←←←←←←←←  █████│  ← {bar_h}px dark bar
-            #  ├────────────────────────────────────────┤
-            #  │             video content              │
-            #  └────────────────────────────────────────┘
-            # scroll right→left at 55px/sec, loops continuously
-
-            bar_filter  = f"drawbox=x=0:y=0:w=iw:h={bar_h}:color=black@0.88:t=fill"
-            text_filter = (
-                f"drawtext="
-                f"text='    KYAWGYI FAMILYS    ':"
-                f"x=w-mod(t*55\\,w+tw):"
-                f"y={text_y}:"
-                f"fontsize={font_sz}:"
-                f"fontcolor=white@0.95"
-            )
-
-            vf = f"{bar_filter},{text_filter}{scale_filter}"
-
-            subprocess.run([
-                'ffmpeg', '-y', '-i', raw_video, '-vf', vf,
-                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-                '-c:a', 'aac', '-b:a', '128k', '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart', final_video
-            ], check=True, capture_output=True)
-            send_progress("✅ Video processed — scrolling watermark bar applied")
-        except Exception as e:
-            send_progress(f"⚠️ Encode warning: {e} — raw video သုံးမယ်")
+        if SKIP_WATERMARK:
+            send_progress("⏭️ Watermark skip — plain video ကို သုံးမယ် (V5 Funhub)")
             final_video = raw_video
+        else:
+            send_progress("⚙️ Processing video...")
+            try:
+                # ── Scale filter first (if needed) ────────────────────────────────
+                scale_filter = ""
+                if height > 0:
+                    if   TARGET_RESOLUTION == '1080p' and height >= 1080: scale_filter = ",scale=-2:1080"
+                    elif TARGET_RESOLUTION == '720p'  and height >= 720:  scale_filter = ",scale=-2:720"
+                    else: scale_filter = ",scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    
+                # ── Compute fixed pixel values (expression-based fails on some ffmpeg) ──
+                # Use actual video height, fallback to 720 if unknown
+                ref_h    = height if height > 0 else 720
+                bar_h    = max(40, int(ref_h * 0.07))       # 7% of height, min 40px
+                font_sz  = max(18, int(bar_h * 0.55))        # 55% of bar, min 18px
+                text_y   = max(4,  (bar_h - font_sz) // 2)  # vertically centered
+    
+                # ── Watermark bar ──────────────────────────────────────────────────
+                #  ┌────────────────────────────────────────┐
+                #  │████  KYAWGYI FAMILYS ←←←←←←←←  █████│  ← {bar_h}px dark bar
+                #  ├────────────────────────────────────────┤
+                #  │             video content              │
+                #  └────────────────────────────────────────┘
+                # scroll right→left at 55px/sec, loops continuously
+    
+                bar_filter  = f"drawbox=x=0:y=0:w=iw:h={bar_h}:color=black@0.88:t=fill"
+                text_filter = (
+                    f"drawtext="
+                    f"text='    KYAWGYI FAMILYS    ':"
+                    f"x=w-mod(t*55\\,w+tw):"
+                    f"y={text_y}:"
+                    f"fontsize={font_sz}:"
+                    f"fontcolor=white@0.95"
+                )
+    
+                vf = f"{bar_filter},{text_filter}{scale_filter}"
+    
+                subprocess.run([
+                    'ffmpeg', '-y', '-i', raw_video, '-vf', vf,
+                    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+                    '-c:a', 'aac', '-b:a', '128k', '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart', final_video
+                ], check=True, capture_output=True)
+                send_progress("✅ Video processed — scrolling watermark bar applied")
+            except Exception as e:
+                send_progress(f"⚠️ Encode warning: {e} — raw video သုံးမယ်")
+                final_video = raw_video
 
         # ── 4. Split if > 2GB ──────────────────────────────────────────────────
         video_parts = [final_video]
